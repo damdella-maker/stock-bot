@@ -3,12 +3,30 @@ import telebot
 import requests
 from datetime import datetime
 import time
+import threading
+from flask import Flask
 
+# Configuration
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FINNHUB = os.environ.get('FINNHUB_KEY')
+PORT = int(os.environ.get('PORT', 10000))
 
 bot = telebot.TeleBot(TOKEN)
 
+# Petit serveur web pour Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=PORT)
+
+# Lancer Flask dans un thread séparé
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ===== COMMANDES TELEGRAM =====
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "🚀 Bot actif !\n\nCommandes :\n/analyse TICKER\n/top\n/aide")
@@ -20,10 +38,11 @@ def aide(message):
 @bot.message_handler(commands=['analyse'])
 def analyse(message):
     try:
-        ticker = message.text.split()[-1].upper()
-        if len(message.text.split()) < 2:
-            bot.reply_to(message, "❌ /analyse AAPL")
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Utilisation : /analyse AAPL")
             return
+        ticker = parts[1].upper()
         
         url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB}"
         data = requests.get(url).json()
