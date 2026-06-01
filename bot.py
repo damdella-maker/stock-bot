@@ -3,33 +3,31 @@ import telebot
 import requests
 from datetime import datetime
 import time
-import threading
-from flask import Flask
+from flask import Flask, request
 
 # Configuration
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FINNHUB = os.environ.get('FINNHUB_KEY')
 PORT = int(os.environ.get('PORT', 10000))
 
-bot = telebot.TeleBot(TOKEN)
+# URL publique de votre service Render (sera définie plus tard)
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://votre-service.onrender.com')
 
-# Petit serveur web pour Render
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "🤖 Bot is running!"
+# ===== FONCTIONS UTILES =====
+def get_stock_data(ticker):
+    url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB}"
+    resp = requests.get(url).json()
+    if 'c' in resp and resp['c'] > 0:
+        return resp
+    return None
 
-def run_flask():
-    app.run(host='0.0.0.0', port=PORT)
-
-# Lancer Flask dans un thread séparé
-threading.Thread(target=run_flask, daemon=True).start()
-
-# ===== COMMANDES TELEGRAM =====
+# ===== COMMANDES =====
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🚀 Bot actif !\n\nCommandes :\n/analyse TICKER\n/top\n/aide")
+    bot.reply_to(message, "🚀 Bot actif en mode webhook !\n\n/analyse TICKER\n/top\n/marché\n/aide")
 
 @bot.message_handler(commands=['aide'])
 def aide(message):
@@ -43,23 +41,19 @@ def analyse(message):
             bot.reply_to(message, "❌ Utilisation : /analyse AAPL")
             return
         ticker = parts[1].upper()
-        
-        url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB}"
-        data = requests.get(url).json()
-        
-        if 'c' not in data or data['c'] == 0:
-            bot.reply_to(message, f"❌ Action {ticker} non trouvée")
+        data = get_stock_data(ticker)
+        if not data:
+            bot.reply_to(message, f"❌ Données indisponibles pour {ticker}")
             return
-        
         price = data['c']
-        change = ((price - data['pc']) / data['pc']) * 100
-        
+        previous = data.get('pc', price)
+        change = ((price - previous) / previous) * 100 if previous else 0
         msg = f"""
 📊 *{ticker}*
 💰 Prix : ${price:.2f}
 📈 Variation : {change:+.2f}%
-🔼 Plus haut : ${data['h']:.2f}
-🔽 Plus bas : ${data['l']:.2f}
+🔼 Plus haut : ${data.get('h', 'N/A')}
+🔽 Plus bas : ${data.get('l', 'N/A')}
 """
         bot.reply_to(message, msg, parse_mode='Markdown')
     except Exception as e:
@@ -69,25 +63,53 @@ def analyse(message):
 def top(message):
     stocks = ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AMZN']
     msg = "🏆 *TOP OPPORTUNITÉS*\n\n"
-    
     for ticker in stocks:
         try:
-            url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB}"
-            data = requests.get(url).json()
-            if 'c' in data and data['c'] > 0:
-                change = ((data['c'] - data['pc']) / data['pc']) * 100
+            data = get_stock_data(ticker)
+            if data:
+                price = data['c']
+                previous = data.get('pc', price)
+                change = ((price - previous) / previous) * 100 if previous else 0
                 emoji = "🟢" if change > 0 else "🔴"
-                msg += f"{emoji} *{ticker}* : ${data['c']:.2f} ({change:+.1f}%)\n"
+                msg += f"{emoji} *{ticker}* : ${price:.2f} ({change:+.1f}%)\n"
         except:
             pass
         time.sleep(0.5)
-    
     bot.reply_to(message, msg, parse_mode='Markdown')
 
-if __name__ == "__main__":
-    print("🤖 Bot démarré !")
-    while True:
+@bot.message_handler(commands=['marché'])
+def marche(message):
+    indices = {'SPY': 'S&P 500', 'QQQ': 'Nasdaq', 'DIA': 'Dow Jones'}
+    msg = "📈 *APERÇU DU MARCHÉ*\n\n"
+    for ticker, name in indices.items():
         try:
-            bot.polling(none_stop=True)
+            data = get_stock_data(ticker)
+            if data:
+                price = data['c']
+                previous = data.get('pc', price)
+                change = ((price - previous) / previous) * 100 if previous else 0
+                emoji = "🟢" if change > 0 else "🔴"
+                msg += f"{emoji} *{name}* : ${price:.2f} ({change:+.1f}%)\n"
         except:
-            time.sleep(10)
+            pass
+        time.sleep(0.5)
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+# ===== ROUTE DU WEBHOOK =====
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'ok', 200
+    return 'bad request', 400
+
+# ===== DÉMARRAGE =====
+if __name__ == "__main__":
+    # Supprimer l'ancien webhook et définir le nouveau
+    bot.remove_webhook()
+    time.sleep(0.5)
+    bot.set_webhook(url=WEBHOOK_URL + '/webhook')
+    print(f"🤖 Bot démarré en webhook sur {WEBHOOK_URL}")
+    app.run(host='0.0.0.0', port=PORT)
