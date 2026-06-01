@@ -7,3 +7,4 @@ numpy>=1.24.0
 pytz>=2023.3
 schedule>=1.2.0
 ta>=0.10.2
+nltk>=3.8
