@@ -126,7 +126,7 @@ def get_fast_analysis(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        current_price = info.get('currentPrice', info.get('regularMarketPrice', info.get('ask', 0)))
+        current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
         if not current_price or current_price == 0:
             return None
         previous_close = info.get('previousClose', current_price)
@@ -134,57 +134,37 @@ def get_fast_analysis(ticker):
         volume = info.get('volume', 0)
         avg_volume = info.get('averageVolume', 0)
         vol_ratio = volume / avg_volume if avg_volume > 0 else 1
-        df = yf.download(ticker, period='5d', progress=False)
-        if df.empty or len(df) < 2:
-            return None
-        close = df['Close'].squeeze()
-        delta = close.diff()
-        gain = delta.where(delta > 0, 0).rolling(min(14, len(close))).mean()
-        loss = -delta.where(delta < 0, 0).rolling(min(14, len(close))).mean()
-        rsi = 100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1])) if loss.iloc[-1] != 0 else 50
-        ema12 = close.ewm(span=min(12, len(close))).mean()
-        ema26 = close.ewm(span=min(26, len(close))).mean()
-        macd_line = ema12 - ema26
-        signal_line = macd_line.ewm(span=min(9, len(close))).mean()
-        ma20 = close.rolling(min(20, len(close))).mean().iloc[-1]
         score = 50
-        if rsi < 70: score += 10
-        if rsi > 30: score += 5
-        if macd_line.iloc[-1] > signal_line.iloc[-1]: score += 10
-        if current_price > ma20: score += 10
+        if change_pct > 0: score += 10
+        if change_pct > 5: score += 10
         if vol_ratio > 1: score += 10
-        if change_pct > 0: score += 5
+        if vol_ratio > 2: score += 10
+        if volume > 1000000: score += 10
         score = min(100, score)
-        df_atr = yf.download(ticker, period='2wk', progress=False)
-        if not df_atr.empty and len(df_atr) >= 5:
-            high = df_atr['High'].squeeze()
-            low = df_atr['Low'].squeeze()
-            close_atr = df_atr['Close'].squeeze()
-            tr = pd.concat([high - low, (high - close_atr.shift()).abs(), (low - close_atr.shift()).abs()], axis=1).max(axis=1)
-            atr = tr.rolling(min(14, len(tr))).mean().iloc[-1]
-        else:
-            atr = current_price * 0.05
+        atr = current_price * 0.03
         stop_loss = round(current_price - 2 * atr, 2)
         tp1 = round(current_price + 2 * atr, 2)
         tp2 = round(current_price + 4 * atr, 2)
         tp3 = round(current_price + 6 * atr, 2)
-        name, isin, sector, industry, cap = get_stock_info_fast(ticker)
+        name = info.get('shortName', info.get('longName', ticker))
+        isin = info.get('isin', 'N/A')
+        sector = info.get('sector', 'N/A')
         return {
-            'ticker': ticker, 'name': name, 'isin': isin, 'sector': sector,
-            'industry': industry, 'market_cap': cap, 'price': round(current_price, 2),
-            'change_pct': round(change_pct, 2), 'rsi': round(rsi, 1),
-            'macd': round(macd_line.iloc[-1], 3), 'macd_signal': round(signal_line.iloc[-1], 3),
-            'ma20': round(ma20, 2), 'vol_ratio': round(vol_ratio, 1),
-            'volume': volume, 'avg_volume': avg_volume,
-            'atr': round(atr, 2), 'score': score,
-            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3
+            'ticker': ticker, 'name': name[:40], 'isin': isin, 'sector': sector,
+            'price': round(current_price, 3), 'change_pct': round(change_pct, 2),
+            'vol_ratio': round(vol_ratio, 1), 'volume': volume, 'score': score,
+            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+            'ma20': 0, 'macd': 0, 'macd_signal': 0, 'rsi': 0,
+            'avg_volume': avg_volume, 'atr': round(atr, 2),
+            'risk_reward': 2.0, 'potential_10': 50, 'potential_20': 30, 'potential_30': 20,
+            'industry': sector, 'market_cap': 0
         }
     except:
         return None
 
 def scan_all_movers():
     movers = []
-    for ticker in HIGH_GROWTH_STOCKS[:50]:
+    for ticker in HIGH_GROWTH_STOCKS[:30]:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -193,18 +173,19 @@ def scan_all_movers():
             if current and previous and current > 0 and previous > 0:
                 change = ((current - previous) / previous) * 100
                 volume = info.get('volume', 0)
-                name = info.get('shortName', info.get('longName', ticker))
-                movers.append({'ticker': ticker, 'name': name, 'price': current,
-                               'change': round(change, 2), 'volume': volume})
+                name = info.get('shortName', ticker)
+                movers.append({
+                    'ticker': ticker, 'name': name[:30],
+                    'price': current, 'change': round(change, 2), 'volume': volume
+                })
         except:
             pass
-        time.sleep(0.03)
     movers.sort(key=lambda x: x['change'], reverse=True)
     return movers
-
+    
 def get_tomorrow_recommendations():
     recommendations = []
-    for ticker in HIGH_GROWTH_STOCKS[:40]:
+    for ticker in HIGH_GROWTH_STOCKS[:25]:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -216,41 +197,16 @@ def get_tomorrow_recommendations():
             volume = info.get('volume', 0)
             avg_volume = info.get('averageVolume', 0)
             vol_ratio = volume / avg_volume if avg_volume > 0 else 1
-            df = yf.download(ticker, period='1mo', progress=False)
-            if df.empty or len(df) < 10:
-                continue
-            close = df['Close'].squeeze()
-            delta = close.diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            rsi = 100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1])) if loss.iloc[-1] != 0 else 50
-            ema12 = close.ewm(span=12).mean()
-            ema26 = close.ewm(span=26).mean()
-            macd_line = ema12 - ema26
-            signal_line = macd_line.ewm(span=9).mean()
-            ma5 = close.rolling(5).mean().iloc[-1]
-            ma10 = close.rolling(10).mean().iloc[-1]
-            ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else ma10
-            change_5d = ((close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]) * 100 if len(close) >= 5 else 0
             score = 40
-            if change_today > 0: score += 5
-            if change_today > 3: score += 5
-            if change_5d > 5: score += 5
-            if change_5d > 10: score += 5
-            if current > ma5: score += 5
-            if current > ma10: score += 5
-            if current > ma20: score += 5
-            if ma5 > ma10: score += 5
-            if ma10 > ma20: score += 5
-            if 30 <= rsi <= 50: score += 10
-            if macd_line.iloc[-1] > signal_line.iloc[-1]: score += 5
-            if vol_ratio > 1.5: score += 8
-            elif vol_ratio > 1: score += 4
+            if change_today > 0: score += 10
+            if change_today > 3: score += 10
+            if vol_ratio > 1: score += 10
+            if vol_ratio > 2: score += 15
+            if volume > 500000: score += 15
             score = min(100, max(0, score))
-            a = get_fast_analysis(ticker)
-            stop = a['stop_loss'] if a else round(current * 0.93, 2)
-            tp1 = a['tp1'] if a else round(current * 1.07, 2)
-            tp2 = a['tp2'] if a else round(current * 1.15, 2)
+            stop = round(current * 0.93, 2)
+            tp1 = round(current * 1.07, 2)
+            tp2 = round(current * 1.15, 2)
             if score >= 80: potential = "Tres eleve"
             elif score >= 65: potential = "Eleve"
             elif score >= 50: potential = "Modere"
@@ -260,14 +216,12 @@ def get_tomorrow_recommendations():
             recommendations.append({
                 'ticker': ticker, 'name': name, 'sector': sector,
                 'price': round(current, 3), 'change_today': round(change_today, 2),
-                'change_5d': round(change_5d, 2), 'rsi': round(rsi, 1),
-                'vol_ratio': round(vol_ratio, 1), 'score': score,
-                'stop': stop, 'tp1': tp1, 'tp2': tp2,
-                'potential': potential, 'trend': 'Haussiere' if current > ma5 > ma10 else 'Neutre'
+                'change_5d': 0, 'rsi': 0, 'vol_ratio': round(vol_ratio, 1),
+                'score': score, 'stop': stop, 'tp1': tp1, 'tp2': tp2,
+                'potential': potential, 'trend': 'N/A'
             })
         except:
             pass
-        time.sleep(0.1)
     recommendations.sort(key=lambda x: x['score'], reverse=True)
     return recommendations[:5]
 
