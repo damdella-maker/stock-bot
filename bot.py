@@ -423,9 +423,9 @@ def send_alert_to_all(msg):
 
 # ===== COMMANDES =====
 @bot.message_handler(commands=['start'])
-def cmd_start(message):
-    add_subscriber(message.chat.id)
-       msg = "🚀 *TRADER PRO V7*\n\n"
+    def cmd_start(message):
+                add_subscriber(message.chat.id)
+    msg = "🚀 *TRADER PRO V7*\n\n"
     msg += "✅ *Bot actif !*\n\n"
     msg += "📊 *Scan & Analyse :*\n"
     msg += "/rapide - Top gainers instantane\n"
