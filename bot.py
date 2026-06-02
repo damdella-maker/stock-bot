@@ -425,49 +425,44 @@ def send_alert_to_all(msg):
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     add_subscriber(message.chat.id)
-    msg = """
-🚀 *TRADER PRO V7*
-
-✅ *Bot actif !*
-
-📊 *Scan & Analyse :*
-/rapide - Top gainers instantane
-/scan - Scan avec filtre
-/scan20 - Potentiel 20-50%
-/scan50 - Potentiel >50%
-/allmovers - Tous les mouvements
-/analyse TICKER - Rapport complet
-/explosive - Top opportunites
-📅 /demain - Top 5 pour demain
-
-💼 *Trading :*
-/achat TICKER PRIX MONTANT - Achat rapide
-/portfolio - Positions avec P&L
-/vendre TICKER - Fermer une position
-
-📈 *Marche :*
-/marche - Indices en direct
-
-📋 *Suivi :*
-/historique - Trades fermes
-/stats - Performance
-/alerte TICKER PRIX - Creer alerte
-/import_csv - Import Trading212
-
-⚙️ *Parametres :*
-/setrange MIN MAX - Votre filtre
-/aide - Guide complet
-
-🔔 *Notifications auto :*
-• Toutes les heures : top mouvements
-• Alerte si baisse > 10%
-• Surveillance positions
-"""
+    msg = "🚀 *TRADER PRO V7*\n\n"
+    msg += "✅ Bot actif !\n\n"
+    msg += "📊 /rapide - Top gainers\n"
+    msg += "📊 /scan - Scan filtre\n"
+    msg += "📊 /scan20 - Potentiel 20-50%\n"
+    msg += "📊 /scan50 - Potentiel >50%\n"
+    msg += "📊 /allmovers - Tous mouvements\n"
+    msg += "📊 /analyse TICKER - Rapport\n"
+    msg += "💥 /explosive - Top opportunites\n"
+    msg += "📈 /marche - Indices\n"
+    msg += "📅 /demain - Top 5 demain\n"
+    msg += "📝 /achat TICKER PRIX MONTANT\n"
+    msg += "💼 /portfolio - Positions\n"
+    msg += "📋 /historique - Historique\n"
+    msg += "📊 /stats - Performance\n"
+    msg += "🔔 /alerte TICKER PRIX\n"
+    msg += "📁 /import_csv - Import CSV\n"
+    msg += "⚙️ /setrange MIN MAX\n"
+    msg += "📚 /aide - Guide"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['aide'])
 def cmd_aide(message):
-    msg = "/rapide /allmovers /scan /scan20 /scan50 /analyse /demain /explosive /marche /portfolio /vendre /historique /stats /alerte /import_csv /setrange"
+    msg = "📚 *GUIDE*\n\n"
+    msg += "/rapide - Top gainers\n"
+    msg += "/scan - Scan avec filtre\n"
+    msg += "/scan20 - 20-50%\n"
+    msg += "/scan50 - >50%\n"
+    msg += "/analyse TICKER - Rapport\n"
+    msg += "/demain - Top 5 demain\n"
+    msg += "/achat TICKER PRIX MONTANT\n"
+    msg += "/portfolio - Positions\n"
+    msg += "/vendre TICKER - Vendre\n"
+    msg += "/historique - Historique\n"
+    msg += "/stats - Statistiques\n"
+    msg += "/alerte TICKER PRIX - Alerte\n"
+    msg += "/import_csv - Import CSV\n"
+    msg += "/setrange MIN MAX - Filtre"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['setrange'])
