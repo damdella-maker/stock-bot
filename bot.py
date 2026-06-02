@@ -77,7 +77,7 @@ def add_subscriber(chat_id):
 def get_all_subscribers():
     return [r[0] for r in db_fetchall('SELECT chat_id FROM subscribers')]
 
-# ===== WATCHLIST ULTRA-ELARGIE =====
+# ===== WATCHLIST =====
 HIGH_GROWTH_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'NFLX',
     'CRM', 'ADBE', 'INTC', 'QCOM', 'AVGO', 'COIN', 'MARA', 'RIOT', 'MSTR',
@@ -97,10 +97,8 @@ HIGH_GROWTH_STOCKS = [
     'BA', 'CCL', 'AAL', 'UAL', 'DAL', 'M', 'W', 'CVNA',
     'SNAP', 'UBER', 'ZM', 'CRWD', 'DDOG', 'SNOW', 'MDB', 'ZS', 'NET',
     'FSLY', 'U', 'DASH', 'ABNB', 'PTON', 'BYND', 'DKNG', 'PINS',
-    'LITM', 'SHPW', 'PEGY',
-    'BURU', 'FOXO', 'VTAK', 'RSLS', 'GCTK', 'IMNN'
+    'LITM', 'SHPW', 'PEGY', 'BURU', 'FOXO', 'VTAK', 'RSLS', 'GCTK', 'IMNN'
 ]
-
 HIGH_GROWTH_STOCKS = list(set(HIGH_GROWTH_STOCKS))
 
 # ===== OUTILS =====
@@ -170,9 +168,6 @@ def get_fast_analysis(ticker):
         tp1 = round(current_price + 2 * atr, 2)
         tp2 = round(current_price + 4 * atr, 2)
         tp3 = round(current_price + 6 * atr, 2)
-        risk = current_price - stop_loss
-        reward = tp1 - current_price
-        rr = round(reward / risk, 2) if risk > 0 else 0
         name, isin, sector, industry, cap = get_stock_info_fast(ticker)
         return {
             'ticker': ticker, 'name': name, 'isin': isin, 'sector': sector,
@@ -182,11 +177,7 @@ def get_fast_analysis(ticker):
             'ma20': round(ma20, 2), 'vol_ratio': round(vol_ratio, 1),
             'volume': volume, 'avg_volume': avg_volume,
             'atr': round(atr, 2), 'score': score,
-            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-            'risk_reward': rr,
-            'potential_10': min(95, max(5, 70 if score > 60 else 40)),
-            'potential_20': min(85, max(5, 55 if score > 60 else 30)),
-            'potential_30': min(70, max(5, 40 if score > 60 else 20))
+            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3
         }
     except:
         return None
@@ -241,7 +232,6 @@ def get_tomorrow_recommendations():
             ma10 = close.rolling(10).mean().iloc[-1]
             ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else ma10
             change_5d = ((close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]) * 100 if len(close) >= 5 else 0
-            change_10d = ((close.iloc[-1] - close.iloc[-10]) / close.iloc[-10]) * 100 if len(close) >= 10 else change_5d
             score = 40
             if change_today > 0: score += 5
             if change_today > 3: score += 5
@@ -253,19 +243,9 @@ def get_tomorrow_recommendations():
             if ma5 > ma10: score += 5
             if ma10 > ma20: score += 5
             if 30 <= rsi <= 50: score += 10
-            elif 50 <= rsi <= 65: score += 5
             if macd_line.iloc[-1] > signal_line.iloc[-1]: score += 5
-            if macd_line.iloc[-1] > 0: score += 5
             if vol_ratio > 1.5: score += 8
             elif vol_ratio > 1: score += 4
-            if change_today > 0 and change_5d > 0 and change_10d > 0: score += 5
-            try:
-                spy = yf.Ticker('SPY')
-                spy_info = spy.info
-                spy_change = ((spy_info.get('currentPrice', 0) - spy_info.get('previousClose', 0)) / spy_info.get('previousClose', 1)) * 100
-                if spy_change > 0: score += 3
-            except:
-                pass
             score = min(100, max(0, score))
             a = get_fast_analysis(ticker)
             stop = a['stop_loss'] if a else round(current * 0.93, 2)
@@ -283,8 +263,7 @@ def get_tomorrow_recommendations():
                 'change_5d': round(change_5d, 2), 'rsi': round(rsi, 1),
                 'vol_ratio': round(vol_ratio, 1), 'score': score,
                 'stop': stop, 'tp1': tp1, 'tp2': tp2,
-                'potential': potential, 'ma5': round(ma5, 2), 'ma10': round(ma10, 2),
-                'trend': 'Haussiere' if current > ma5 > ma10 else 'Neutre' if current > ma10 else 'Baissiere'
+                'potential': potential, 'trend': 'Haussiere' if current > ma5 > ma10 else 'Neutre'
             })
         except:
             pass
@@ -306,39 +285,23 @@ def cmd_start(message):
     msg = """
 🚀 *TRADER PRO V6*
 
-✅ *Bot actif avec 150+ actions !*
+✅ *Bot actif !*
 
-📊 /rapide - Top gainers instantane
-📊 /scan - Scan filtre personnalise
+📊 /rapide - Top gainers
+📊 /scan - Scan filtre
 📊 /scan20 - Potentiel 20-50%
 📊 /scan50 - Potentiel >50%
-📊 /allmovers - TOUS les mouvements
-📊 /analyse TICKER - Rapport complet
-💥 /explosive - Top opportunites
-📈 /marche - Indices en direct
-📅 /demain - Top 5 pour demain
+📊 /allmovers - Tous mouvements
+📊 /analyse TICKER - Rapport
+📅 /demain - Top 5 demain
 💼 /portfolio - Positions
-📋 /historique - Historique
-📊 /stats - Performance
-/setrange MIN MAX - Filtre
 /aide - Guide complet
 """
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['aide'])
 def cmd_aide(message):
-    msg = """
-📚 *GUIDE*
-
-/rapide - Top gainers
-/allmovers - Tous les mouvements
-/scan - Avec votre filtre
-/scan20 - Potentiel 20-50%
-/scan50 - Potentiel >50%
-/analyse TICKER - Rapport detaille
-/demain - Top 5 pour demain
-/explosive - Top 5 scores
-"""
+    msg = "/rapide /allmovers /scan /scan20 /scan50 /analyse /demain /explosive /marche /portfolio /vendre /historique /stats /alerte /import_csv /setrange"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['setrange'])
@@ -360,18 +323,15 @@ def cmd_rapide(message):
         return
     gainers = [m for m in movers if m['change'] > 0][:15]
     if not gainers:
-        bot.reply_to(message, "🔴 Aucune action en hausse aujourd'hui")
+        bot.reply_to(message, "🔴 Aucune action en hausse")
         return
-    msg = "⚡ *TOP GAINERS DU JOUR*\n\n"
+    msg = "⚡ *TOP GAINERS*\n\n"
     for i, m in enumerate(gainers, 1):
         emoji = "🔥" if m['change'] > 20 else "🟢"
         bar = "█" * min(10, int(abs(m['change']) / 5))
         msg += f"*{i}. {m['ticker']}* {emoji}\n"
-        msg += f"   {m['name'][:40]}\n"
         msg += f"   💰 ${m['price']:.3f} | +{m['change']}%\n"
-        msg += f"   `{bar}`\n"
-        msg += f"   Vol: {m['volume']:,}\n\n"
-    msg += "📊 /analyse TICKER pour le detail"
+        msg += f"   `{bar}` | Vol: {m['volume']:,}\n\n"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['allmovers'])
@@ -383,17 +343,16 @@ def cmd_allmovers(message):
         return
     gainers = [m for m in movers if m['change'] > 0][:10]
     losers = [m for m in movers if m['change'] < 0][:5]
-    msg = "📊 *TOUS LES MOUVEMENTS*\n\n"
+    msg = "📊 *MOUVEMENTS*\n\n"
     if gainers:
-        msg += "🟢 *TOP HAUSSES :*\n"
+        msg += "🟢 *HAUSSES :*\n"
         for m in gainers:
-            msg += f"• *{m['ticker']}* : +{m['change']}% (${m['price']:.3f})\n"
+            msg += f"• *{m['ticker']}* : +{m['change']}%\n"
         msg += "\n"
     if losers:
-        msg += "🔴 *TOP BAISSES :*\n"
+        msg += "🔴 *BAISSES :*\n"
         for m in losers:
-            msg += f"• *{m['ticker']}* : {m['change']}% (${m['price']:.3f})\n"
-    msg += "\n💡 /rapide pour le top gainers"
+            msg += f"• *{m['ticker']}* : {m['change']}%\n"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['scan', 'scan20', 'scan50'])
@@ -405,74 +364,41 @@ def cmd_scan(message):
         prefs = db_fetchone('SELECT min_potential FROM subscribers WHERE chat_id=?', (message.chat.id,))
         mn = prefs[0] if prefs else 3
     bot.send_chat_action(message.chat.id, 'typing')
-    wait_msg = bot.reply_to(message, "🔍 *Scan en cours...*", parse_mode='Markdown')
+    wait_msg = bot.reply_to(message, "🔍 *Scan...*", parse_mode='Markdown')
     all_movers = scan_all_movers()
     results = [m for m in all_movers if m['change'] >= mn]
     if not results:
-        bot.edit_message_text(
-            f"🔍 *Aucune action > {mn}%*\n\n💡 /allmovers pour voir tous les mouvements",
-            chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown'
-        )
+        bot.edit_message_text(f"🔍 Aucune action > {mn}%", chat_id=message.chat.id, message_id=wait_msg.message_id)
         return
-    msg = f"🔥 *ACTIONS > {mn}% - {len(results)} TROUVES*\n\n"
+    msg = f"🔥 *ACTIONS > {mn}%*\n\n"
     for i, m in enumerate(results[:10], 1):
         a = get_fast_analysis(m['ticker'])
         score = a['score'] if a else '?'
         stop = a['stop_loss'] if a else round(m['price'] * 0.95, 2)
-        tp1 = a['tp1'] if a else round(m['price'] * 1.10, 2)
-        stars = "⭐" * min(5, int(score) // 20 + 1) if isinstance(score, int) else "⭐"
-        emoji = "🔥" if m['change'] > 50 else "🟢" if m['change'] > 20 else "🟡"
-        msg += f"*{i}. {m['ticker']}* {emoji}\n"
-        msg += f"   {stars} Score: {score}/100\n"
-        msg += f"   💰 ${m['price']:.3f} | +{m['change']}%\n"
-        msg += f"   🛑 Stop: ${stop} | TP1: ${tp1}\n"
-        msg += f"   Vol: {m['volume']:,}\n\n"
-    msg += "📊 /analyse TICKER pour le rapport complet"
+        msg += f"*{i}. {m['ticker']}* +{m['change']}% | Score: {score}/100\n"
+        msg += f"   💰 ${m['price']:.3f} | 🛑 Stop: ${stop}\n\n"
     bot.edit_message_text(msg, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown')
 
 @bot.message_handler(commands=['demain'])
 def cmd_demain(message):
     bot.send_chat_action(message.chat.id, 'typing')
-    wait_msg = bot.reply_to(message, "🔮 *Analyse du marche pour demain...*\n\nRecherche des meilleures opportunites...", parse_mode='Markdown')
+    wait_msg = bot.reply_to(message, "🔮 *Analyse pour demain...*", parse_mode='Markdown')
     recommendations = get_tomorrow_recommendations()
     if not recommendations:
-        bot.edit_message_text("❌ *Analyse impossible*\n\nMarche ferme ou donnees indisponibles.", chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown')
+        bot.edit_message_text("❌ Analyse impossible", chat_id=message.chat.id, message_id=wait_msg.message_id)
         return
     tomorrow = (datetime.now() + timedelta(days=1)).strftime('%d/%m/%Y')
-    msg = f"🔮 *TOP 5 ACTIONS POUR DEMAIN - {tomorrow}*\n\n"
-    msg += "═" * 30 + "\n\n"
+    msg = f"🔮 *TOP 5 POUR DEMAIN - {tomorrow}*\n\n"
     for i, r in enumerate(recommendations, 1):
-        if r['score'] >= 80: stars, emoji, reco = "⭐⭐⭐⭐⭐", "🔥", "ACHAT FORT"
-        elif r['score'] >= 65: stars, emoji, reco = "⭐⭐⭐⭐", "🟢", "ACHAT"
-        elif r['score'] >= 50: stars, emoji, reco = "⭐⭐⭐", "🟡", "SURVEILLER"
-        else: stars, emoji, reco = "⭐⭐", "🟠", "ATTENDRE"
-        bar = "█" * (r['score'] // 10) + "░" * (10 - r['score'] // 10)
-        msg += f"*{i}. {r['name']} ({r['ticker']})*\n"
-        msg += f"   {stars} Score : {r['score']}/100\n"
-        msg += f"   `[{bar}]`\n"
-        msg += f"   {emoji} *{reco}*\n\n"
-        msg += f"   💰 Prix actuel : ${r['price']:.3f}\n"
-        msg += f"   📈 Aujourd'hui : {r['change_today']:+.1f}%\n"
-        msg += f"   📊 Sur 5 jours : {r['change_5d']:+.1f}%\n"
-        msg += f"   📐 RSI : {r['rsi']} | Tendance : {r['trend']}\n"
-        msg += f"   📏 Volume : {r['vol_ratio']}x moyenne\n"
-        msg += f"   🏭 Secteur : {r['sector']}\n\n"
-        msg += f"   🛡️ *Protection :*\n"
-        msg += f"   🛑 Stop-loss : ${r['stop']} (-{round((1-r['stop']/r['price'])*100,1)}%)\n"
-        msg += f"   🎯 Objectif 1 : ${r['tp1']} (+{round((r['tp1']/r['price']-1)*100,1)}%)\n"
-        msg += f"   🎯 Objectif 2 : ${r['tp2']} (+{round((r['tp2']/r['price']-1)*100,1)}%)\n"
-        msg += f"   🔮 Potentiel demain : *{r['potential']}*\n\n"
-        msg += "─" * 30 + "\n\n"
-    best = recommendations[0]
-    msg += f"💡 *RESUME*\n\n"
-    msg += f"🥇 Top recommandation : *{best['ticker']}* ({best['score']}/100)\n"
-    msg += f"📊 {best['change_today']:+.1f}% aujourd'hui | RSI : {best['rsi']}\n"
-    msg += f"🛑 Stop : ${best['stop']} | 🎯 TP : ${best['tp1']}\n\n"
-    msg += "⚠️ *Avertissement :*\n"
-    msg += "Ces recommandations sont basees sur une analyse technique et ne garantissent pas les performances futures.\n"
-    msg += "Faites toujours vos propres recherches avant d'investir.\n\n"
-    msg += "📊 */analyse TICKER* pour un rapport complet\n"
-    msg += "💼 Cliquez sur */analyse TICKER* puis *ACHETER* pour investir"
+        if r['score'] >= 80: stars, reco = "⭐⭐⭐⭐⭐", "ACHAT FORT"
+        elif r['score'] >= 65: stars, reco = "⭐⭐⭐⭐", "ACHAT"
+        elif r['score'] >= 50: stars, reco = "⭐⭐⭐", "SURVEILLER"
+        else: stars, reco = "⭐⭐", "ATTENDRE"
+        msg += f"*{i}. {r['ticker']}* {stars} {reco}\n"
+        msg += f"   Score: {r['score']}/100 | 💰 ${r['price']:.3f}\n"
+        msg += f"   📈 +{r['change_today']}% | RSI: {r['rsi']}\n"
+        msg += f"   🛑 Stop: ${r['stop']} | 🎯 TP: ${r['tp1']}\n\n"
+    msg += "📊 /analyse TICKER pour le detail"
     bot.edit_message_text(msg, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown')
 
 @bot.message_handler(commands=['analyse'])
@@ -488,31 +414,17 @@ def cmd_analyse(message):
         bot.reply_to(message, f"❌ Donnees indisponibles pour {ticker}")
         return
     msg = f"""📊 *{a['name']} ({a['ticker']})*
-🔖 ISIN : `{a['isin']}`
-🏭 {a['sector']} | {a['industry']}
+🔖 ISIN: `{a['isin']}`
 
-⭐ *Score Technique : {a['score']}/100*
-💰 Prix : ${a['price']}
-📈 Variation : {a['change_pct']:+.2f}%
+⭐ Score: {a['score']}/100
+💰 Prix: ${a['price']}
+📈 Variation: {a['change_pct']:+.2f}%
 
-📊 *Indicateurs :*
-• RSI : {a['rsi']}
-• MACD : {a['macd']} | Signal : {a['macd_signal']}
-• MA20 : ${a['ma20']}
-• Volume : {a['vol_ratio']}x ({a['volume']:,})
+📊 RSI: {a['rsi']} | MACD: {a['macd']}
+📏 Vol: {a['vol_ratio']}x ({a['volume']:,})
 
-🛡️ *Gestion du Risque :*
-• 🛑 Stop-Loss : ${a['stop_loss']}
-• 🎯 TP1 : ${a['tp1']} (+{round((a['tp1']/a['price']-1)*100,1)}%)
-• 🎯 TP2 : ${a['tp2']} (+{round((a['tp2']/a['price']-1)*100,1)}%)
-• 🎯 TP3 : ${a['tp3']} (+{round((a['tp3']/a['price']-1)*100,1)}%)
-
-🎲 *Potentiel Estime :*
-• +10% : {a['potential_10']}%
-• +20% : {a['potential_20']}%
-• +30% : {a['potential_30']}%
-
-⚠️ Estimations - Pas de garantie"""
+🛡️ Stop: ${a['stop_loss']}
+🎯 TP1: ${a['tp1']} | TP2: ${a['tp2']} | TP3: ${a['tp3']}"""
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("🛒 ACHETER", callback_data=f"buy_{ticker}_{a['price']}"),
@@ -525,7 +437,7 @@ def handle_buy(call):
     _, ticker, price = call.data.split('_')
     bot.answer_callback_query(call.id)
     msg = bot.send_message(call.message.chat.id,
-        f"🛒 *Achat {ticker}*\nPrix actuel : ${float(price):.3f}\n\n💰 *Quel montant investir ?* (ex: 100)",
+        f"🛒 *Achat {ticker}*\nPrix: ${float(price):.3f}\n\n💰 *Montant a investir ?* (ex: 100)",
         parse_mode='Markdown')
     bot.register_next_step_handler(msg, process_amount, ticker)
 
@@ -542,7 +454,7 @@ def process_amount(message, ticker):
         return
     curr = get_current_price(ticker) or 0
     msg = bot.send_message(message.chat.id,
-        f"💰 Montant : {amount}€\n💵 Prix actuel : ${curr:.3f}\n\n📝 *Prix d'achat exact ?*",
+        f"💰 Montant: {amount}€\n💵 Prix actuel: ${curr:.3f}\n\n📝 *Prix d'achat exact ?*",
         parse_mode='Markdown')
     bot.register_next_step_handler(msg, process_price, ticker, amount)
 
@@ -558,16 +470,10 @@ def process_price(message, ticker, amount):
     tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
     tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
     tp3 = a['tp3'] if a else round(buy_price * 1.30, 2)
-    db_execute('''INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-        (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
+    db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+               (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
     loss = amount - (stop / buy_price * amount)
-    msg = f"""✅ *POSITION OUVERTE*
-📊 *{ticker}*
-💰 {amount:.2f}€ | ${buy_price:.3f}
-📦 {qty:.4f} actions
-🛑 Stop ${stop} (perte max {loss:.2f}€)
-🎯 TP1 ${tp1} | TP2 ${tp2} | TP3 ${tp3}"""
+    msg = f"✅ *POSITION OUVERTE*\n📊 {ticker}\n💰 {amount:.2f}€ | ${buy_price:.3f}\n📦 {qty:.4f} actions\n🛑 Stop ${stop} (perte max {loss:.2f}€)\n🎯 TP1 ${tp1} | TP2 ${tp2} | TP3 ${tp3}"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['explosive'])
@@ -576,10 +482,114 @@ def cmd_explosive(message):
     movers = scan_all_movers()
     gainers = [m for m in movers if m['change'] > 10][:10]
     if not gainers:
-        bot.reply_to(message, "Aucune opportunite explosive")
+        bot.reply_to(message, "Aucune opportunite")
         return
     msg = "💥 *TOP OPPORTUNITES*\n\n"
     for m in gainers:
-        a = get_fast_analysis(m['ticker'])
-        score = a['score'] if a else '?'
-        msg += f
+        msg += f"🔥 *{m['ticker']}* +{m['change']}% | 💰 ${m['price']:.3f}\n"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['marche'])
+def cmd_marche(message):
+    bot.send_chat_action(message.chat.id, 'typing')
+    msg = "📈 *MARCHE*\n\n"
+    for t, n in {'^GSPC': 'S&P500', '^IXIC': 'Nasdaq', '^DJI': 'Dow', '^VIX': 'VIX'}.items():
+        try:
+            h = yf.Ticker(t).history(period='2d')
+            if len(h) >= 2:
+                c, p = h['Close'].iloc[-1], h['Close'].iloc[-2]
+                chg = (c-p)/p*100
+                msg += f"{'🟢' if chg>0 else '🔴'} *{n}* {c:,.2f} ({chg:+.2f}%)\n"
+        except:
+            pass
+    msg += f"\n🕐 {datetime.now().strftime('%H:%M:%S')}"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['portfolio'])
+def cmd_portfolio(message):
+    rows = db_fetchall("SELECT * FROM positions WHERE chat_id=? AND status='open'", (message.chat.id,))
+    if not rows:
+        bot.reply_to(message, "📭 Vide")
+        return
+    msg = "💼 *PORTEFEUILLE*\n\n"
+    ti = tc = 0
+    for r in rows:
+        curr = get_current_price(r[2]) or r[3]
+        val = r[4] * (curr / r[3])
+        pnl = val - r[5]
+        ti += r[5]
+        tc += val
+        emoji = "🟢" if pnl >= 0 else "🔴"
+        msg += f"{emoji} *{r[2]}* {r[4]:.4f} act\n   {r[5]:.2f}€ → {val:.2f}€ | {pnl:+.2f}€\n\n"
+    msg += f"━━━━━━\n💰 Total: {tc:.2f}€ | P&L: {tc-ti:+.2f}€"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['vendre'])
+def cmd_vendre(message):
+    try:
+        ticker = message.text.split()[1].upper()
+    except:
+        bot.reply_to(message, "❌ /vendre AAPL")
+        return
+    row = db_fetchone("SELECT * FROM positions WHERE chat_id=? AND ticker=? AND status='open'", (message.chat.id, ticker))
+    if not row:
+        bot.reply_to(message, "❌ Pas de position")
+        return
+    curr = get_current_price(ticker) or row[3]
+    val = row[4] * (curr / row[3])
+    pnl = val - row[5]
+    db_execute('INSERT INTO trades (chat_id, ticker, buy_price, sell_price, quantity, amount, profit_loss, profit_loss_pct, close_date) VALUES (?,?,?,?,?,?,?,?,?)',
+               (message.chat.id, ticker, row[3], curr, row[4], row[5], pnl, (curr/row[3]-1)*100, datetime.now().isoformat()))
+    db_execute('UPDATE positions SET status=? WHERE id=?', ('closed', row[0]))
+    bot.reply_to(message, f"✅ *{ticker}* vendu\n{'🟢' if pnl>=0 else '🔴'} P&L: {pnl:+.2f}€", parse_mode='Markdown')
+
+@bot.message_handler(commands=['historique'])
+def cmd_historique(message):
+    rows = db_fetchall('SELECT * FROM trades WHERE chat_id=? ORDER BY close_date DESC LIMIT 10', (message.chat.id,))
+    if not rows:
+        bot.reply_to(message, "📋 Vide")
+        return
+    msg = "📋 *HISTORIQUE*\n\n"
+    for r in rows:
+        msg += f"{'🟢' if r[7]>=0 else '🔴'} *{r[2]}* {r[7]:+.1f}% | {r[6]:+.2f}€\n"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['stats'])
+def cmd_stats(message):
+    rows = db_fetchall('SELECT profit_loss FROM trades WHERE chat_id=?', (message.chat.id,))
+    if not rows:
+        bot.reply_to(message, "📊 Pas de stats")
+        return
+    wins = sum(1 for r in rows if r[0] > 0)
+    total = sum(r[0] for r in rows)
+    msg = f"📊 *STATS*\n📈 Trades: {len(rows)}\n✅ Win: {wins/len(rows)*100:.1f}%\n💰 P&L: {total:.2f}€\n🏆 Best: {max(r[0] for r in rows):.2f}€\n💀 Worst: {min(r[0] for r in rows):.2f}€"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['alerte'])
+def cmd_alerte(message):
+    try:
+        _, ticker, price = message.text.split()
+        db_execute('INSERT INTO alerts (chat_id, ticker, target_price, date) VALUES (?,?,?,?)', (message.chat.id, ticker.upper(), float(price), datetime.now().isoformat()))
+        bot.reply_to(message, f"🔔 Alerte {ticker.upper()} a ${price}")
+    except:
+        bot.reply_to(message, "❌ /alerte AAPL 200")
+
+@bot.message_handler(commands=['import_csv'])
+def cmd_import_csv(message):
+    msg = bot.reply_to(message, "📁 Envoyez le CSV")
+    bot.register_next_step_handler(msg, process_csv)
+
+def process_csv(message):
+    content = message.document and bot.download_file(bot.get_file(message.document.file_id).file_path).decode('utf-8') or message.text
+    if not content:
+        bot.reply_to(message, "❌ Vide")
+        return
+    try:
+        count = 0
+        for row in csv.DictReader(io.StringIO(content)):
+            t = row.get('Action', row.get('Ticker', ''))
+            q = float(row.get('Quantite', row.get('Quantity', 0)))
+            p = float(row.get('Prix', row.get('Price', 0)))
+            if t and q > 0 and p > 0:
+                amt = q * p
+                db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3,
