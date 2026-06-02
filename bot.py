@@ -420,24 +420,57 @@ def cmd_scan(message):
 def cmd_demain(message):
     bot.send_chat_action(message.chat.id, 'typing')
     wait_msg = bot.reply_to(message, "🔮 *Analyse pour demain...*", parse_mode='Markdown')
-    recommendations = get_tomorrow_recommendations()
-    if not recommendations:
-        bot.edit_message_text("❌ Analyse impossible", chat_id=message.chat.id, message_id=wait_msg.message_id)
+    
+    try:
+        recommendations = get_tomorrow_recommendations()
+    except Exception as e:
+        bot.edit_message_text(
+            f"❌ Erreur lors de l'analyse : {str(e)[:50]}",
+            chat_id=message.chat.id,
+            message_id=wait_msg.message_id
+        )
         return
+    
+    if not recommendations or len(recommendations) == 0:
+        bot.edit_message_text(
+            "❌ *Aucune recommandation disponible*\n\n"
+            "Le marche est peut-etre ferme ou les donnees sont indisponibles.\n\n"
+            "💡 Essayez /rapide pour voir les mouvements du jour.",
+            chat_id=message.chat.id,
+            message_id=wait_msg.message_id,
+            parse_mode='Markdown'
+        )
+        return
+    
     tomorrow = (datetime.now() + timedelta(days=1)).strftime('%d/%m/%Y')
     msg = f"🔮 *TOP 5 POUR DEMAIN - {tomorrow}*\n\n"
+    msg += "═" * 25 + "\n\n"
+    
     for i, r in enumerate(recommendations, 1):
-        if r['score'] >= 80: stars, reco = "⭐⭐⭐⭐⭐", "ACHAT FORT"
-        elif r['score'] >= 65: stars, reco = "⭐⭐⭐⭐", "ACHAT"
-        elif r['score'] >= 50: stars, reco = "⭐⭐⭐", "SURVEILLER"
-        else: stars, reco = "⭐⭐", "ATTENDRE"
-        msg += f"*{i}. {r['ticker']}* {stars} {reco}\n"
-        msg += f"   Score: {r['score']}/100 | 💰 ${r['price']:.3f}\n"
-        msg += f"   📈 +{r['change_today']}% | RSI: {r['rsi']}\n"
-        msg += f"   🛑 Stop: ${r['stop']} | 🎯 TP: ${r['tp1']}\n\n"
-    msg += "📊 /analyse TICKER pour le detail"
-    bot.edit_message_text(msg, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown')
-
+        if r['score'] >= 80:
+            stars, reco = "⭐⭐⭐⭐⭐", "ACHAT FORT"
+        elif r['score'] >= 65:
+            stars, reco = "⭐⭐⭐⭐", "ACHAT"
+        elif r['score'] >= 50:
+            stars, reco = "⭐⭐⭐", "SURVEILLER"
+        else:
+            stars, reco = "⭐⭐", "ATTENDRE"
+        
+        msg += f"*{i}. {r['name']} ({r['ticker']})*\n"
+        msg += f"   {stars} Score: {r['score']}/100 {reco}\n"
+        msg += f"   💰 ${r['price']:.3f} | 📈 +{r['change_today']}% aujourd'hui\n"
+        msg += f"   📊 Vol: {r['vol_ratio']}x | RSI: {r['rsi']}\n"
+        msg += f"   🛑 Stop: ${r['stop']} | 🎯 TP: ${r['tp1']}\n"
+        msg += f"   🔮 Potentiel: *{r['potential']}*\n\n"
+    
+    msg += "⚠️ Analyse basee sur les donnees de marche actuelles."
+    
+    bot.edit_message_text(
+        msg,
+        chat_id=message.chat.id,
+        message_id=wait_msg.message_id,
+        parse_mode='Markdown'
+    )
 @bot.message_handler(commands=['analyse'])
 def cmd_analyse(message):
     try:
