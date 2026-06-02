@@ -77,6 +77,73 @@ def add_subscriber(chat_id):
 def get_all_subscribers():
     return [r[0] for r in db_fetchall('SELECT chat_id FROM subscribers')]
 
+@bot.message_handler(commands=['achat'])
+def cmd_achat(message):
+    """
+    Ajoute un achat rapide : /achat TICKER PRIX MONTANT
+    Exemple : /achat AAPL 150.50 100
+    """
+    try:
+        parts = message.text.split()
+        ticker = parts[1].upper()
+        buy_price = float(parts[2].replace(',', '.'))
+        amount = float(parts[3].replace(',', '.'))
+    except:
+        bot.reply_to(message, "❌ Format : /achat TICKER PRIX MONTANT\nExemple : /achat AAPL 150.50 100")
+        return
+    
+    # Calculs
+    qty = amount / buy_price
+    a = get_fast_analysis(ticker)
+    stop = a['stop_loss'] if a else round(buy_price * 0.90, 2)  # Stop à -10%
+    tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
+    tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
+    tp3 = a['tp3'] if a else round(buy_price * 1.30, 2)
+    
+    # Sauvegarder dans la base
+    db_execute('''INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
+    
+    # Message de confirmation
+    current = get_current_price(ticker)
+    if current:
+        variation = ((current - buy_price) / buy_price) * 100
+        status = "🟢" if variation >= 0 else "🔴"
+    else:
+        variation = 0
+        status = "⚪"
+    
+    msg = f"""✅ *ACHAT ENREGISTRE*
+
+📊 *{ticker}*
+💰 Montant : {amount:.2f}€
+💵 Prix d'achat : ${buy_price:.3f}
+📦 Quantité : {qty:.4f} actions
+{status} Prix actuel : ${current:.3f} ({variation:+.2f}%)""" if current else f"""✅ *ACHAT ENREGISTRE*
+
+📊 *{ticker}*
+💰 Montant : {amount:.2f}€
+💵 Prix d'achat : ${buy_price:.3f}
+📦 Quantité : {qty:.4f} actions"""
+
+    msg += f"""
+
+🛡️ *Protection :*
+• 🛑 Stop-Loss (-10%) : ${stop}
+• 💸 Perte max : {amount * 0.10:.2f}€
+
+🎯 *Objectifs :*
+• TP1 (+10%) : ${tp1} → Gain : {amount * 0.10:.2f}€
+• TP2 (+20%) : ${tp2} → Gain : {amount * 0.20:.2f}€
+• TP3 (+30%) : ${tp3} → Gain : {amount * 0.30:.2f}€
+
+🔍 *Surveillance active*
+⚠️ Alerte si baisse > 10%
+📊 /portfolio pour suivre"""
+    
+    bot.reply_to(message, msg, parse_mode='Markdown')
+    
 # ===== WATCHLIST =====
 HIGH_GROWTH_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'NFLX',
@@ -100,6 +167,70 @@ HIGH_GROWTH_STOCKS = [
     'LITM', 'SHPW', 'PEGY', 'BURU', 'FOXO', 'VTAK', 'RSLS', 'GCTK', 'IMNN'
 ]
 HIGH_GROWTH_STOCKS = list(set(HIGH_GROWTH_STOCKS))
+
+def check_critical_drops():
+    """Vérifie les baisses de plus de 10% sur toutes les positions"""
+    rows = db_fetchall("SELECT * FROM positions WHERE status='open'")
+    
+    for r in rows:
+        curr = get_current_price(r[2])
+        if not curr:
+            continue
+        
+        # Calculer la perte en pourcentage
+        loss_pct = ((curr / r[3]) - 1) * 100
+        
+        # Si baisse > 10%, envoyer une alerte
+        if loss_pct <= -10:
+            amount = r[5]
+            current_value = r[4] * (curr / r[3])
+            loss_amount = current_value - amount
+            
+            alert_msg = f"""🚨 *ALERTE BAISSE CRITIQUE*
+
+📊 *{r[2]}*
+📉 Baisse : {loss_pct:.1f}%
+💰 Investi : {amount:.2f}€
+💸 Valeur actuelle : {current_value:.2f}€
+🔴 Perte : {loss_amount:.2f}€
+
+🛑 Stop-Loss actuel : ${r[5]}
+⚠️ *Envisagez de vendre rapidement !*
+/vendre {r[2]}"""
+            
+            try:
+                bot.send_message(r[1], alert_msg, parse_mode='Markdown')
+            except:
+                pass
+
+def hourly_top_movers():
+    """Envoie les tops mouvements haussiers toutes les heures"""
+    now = datetime.now()
+    
+    # N'envoyer qu'entre 8h et 21h
+    if now.hour < 8 or now.hour >= 21:
+        return
+    
+    movers = scan_all_movers()
+    gainers = [m for m in movers if m['change'] > 2][:5]
+    
+    if not gainers:
+        return
+    
+    msg = f"📊 *TOP MOUVEMENTS HORAIRE - {now.strftime('%H:%M')}*\n\n"
+    
+    for i, m in enumerate(gainers, 1):
+        emoji = "🔥" if m['change'] > 10 else "🟢" if m['change'] > 5 else "🟡"
+        msg += f"*{i}. {m['ticker']}* {emoji} +{m['change']}%\n"
+        msg += f"   💰 ${m['price']:.3f} | Vol: {m['volume']:,}\n\n"
+    
+    msg += "📊 /analyse TICKER pour le detail"
+    
+    for subscriber in get_all_subscribers():
+        try:
+            bot.send_message(subscriber, msg, parse_mode='Markdown')
+        except:
+            pass
 
 # ===== OUTILS =====
 def get_stock_info_fast(ticker):
@@ -320,19 +451,42 @@ def send_alert_to_all(msg):
 def cmd_start(message):
     add_subscriber(message.chat.id)
     msg = """
-🚀 *TRADER PRO V6*
+🚀 *TRADER PRO V7*
 
 ✅ *Bot actif !*
 
-📊 /rapide - Top gainers
-📊 /scan - Scan filtre
-📊 /scan20 - Potentiel 20-50%
-📊 /scan50 - Potentiel >50%
-📊 /allmovers - Tous mouvements
-📊 /analyse TICKER - Rapport
-📅 /demain - Top 5 demain
-💼 /portfolio - Positions
+📊 *Scan & Analyse :*
+/rapide - Top gainers instantane
+/scan - Scan avec filtre
+/scan20 - Potentiel 20-50%
+/scan50 - Potentiel >50%
+/allmovers - Tous les mouvements
+/analyse TICKER - Rapport complet
+/explosive - Top opportunites
+📅 /demain - Top 5 pour demain
+
+💼 *Trading :*
+/achat TICKER PRIX MONTANT - Achat rapide
+/portfolio - Positions avec P&L
+/vendre TICKER - Fermer une position
+
+📈 *Marche :*
+/marche - Indices en direct
+
+📋 *Suivi :*
+/historique - Trades fermes
+/stats - Performance
+/alerte TICKER PRIX - Creer alerte
+/import_csv - Import Trading212
+
+⚙️ *Parametres :*
+/setrange MIN MAX - Votre filtre
 /aide - Guide complet
+
+🔔 *Notifications auto :*
+• Toutes les heures : top mouvements
+• Alerte si baisse > 10%
+• Surveillance positions
 """
     bot.reply_to(message, msg, parse_mode='Markdown')
 
@@ -715,8 +869,19 @@ def monitor():
                 pass
 
 def run_scheduler():
+    """Planificateur de toutes les taches"""
+    # Toutes les 15 minutes : scan auto
     schedule.every(15).minutes.do(auto_scan)
+    
+    # Toutes les 10 minutes : surveillance positions
     schedule.every(10).minutes.do(monitor)
+    
+    # Toutes les 5 minutes : vérification baisses critiques
+    schedule.every(5).minutes.do(check_critical_drops)
+    
+    # Toutes les heures : top mouvements
+    schedule.every(60).minutes.do(hourly_top_movers)
+    
     while True:
         schedule.run_pending()
         time.sleep(10)
