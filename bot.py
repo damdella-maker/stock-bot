@@ -87,8 +87,8 @@ HIGH_GROWTH_STOCKS = [
     'QS', 'GOEV', 'FSR', 'NKLA', 'WKHS', 'HYLN',
     'MRNA', 'PFE', 'BNTX', 'NVAX', 'VXRT', 'INO', 'OCGN', 'BNGO', 'HOTH',
     'GME', 'AMC', 'BB', 'SPCE', 'CLOV', 'WISH', 'MVIS',
-    'LASE', 'HKD', 'TOP', 'MEGL', 'GNS', 'NUWE', 'SOPA', 'AUUD', 'GFAI',
-    'KSCP', 'KALA', 'EFTR', 'CJJD', 'JXJT', 'GSUN', 'YQ', 'CLEU', 'POL',
+    'LASE', 'HKD', 'TOP', 'GNS', 'NUWE', 'SOPA', 'AUUD', 'GFAI',
+    'KSCP', 'KALA', 'EFTR', 'CJJD', 'JXJT', 'YQ', 'CLEU', 'POL',
     'ICU', 'TTOO', 'EOSE', 'AMPX',
     'AFRM', 'UPST', 'SOFI', 'HOOD', 'RBLX', 'SQ', 'PYPL', 'SHOP',
     'BABA', 'JD', 'BIDU', 'BILI', 'TME', 'PDD', 'DQ', 'JKS', 'CAN', 'EH',
@@ -97,7 +97,7 @@ HIGH_GROWTH_STOCKS = [
     'BA', 'CCL', 'AAL', 'UAL', 'DAL', 'M', 'W', 'CVNA',
     'SNAP', 'UBER', 'ZM', 'CRWD', 'DDOG', 'SNOW', 'MDB', 'ZS', 'NET',
     'FSLY', 'U', 'DASH', 'ABNB', 'PTON', 'BYND', 'DKNG', 'PINS',
-    'AGRI', 'WETG', 'MGAM', 'LITM', 'XPON', 'SHPW', 'PEGY',
+    'LITM', 'SHPW', 'PEGY',
     'BURU', 'FOXO', 'VTAK', 'RSLS', 'GCTK', 'IMNN'
 ]
 
