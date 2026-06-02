@@ -592,4 +592,82 @@ def process_csv(message):
             p = float(row.get('Prix', row.get('Price', 0)))
             if t and q > 0 and p > 0:
                 amt = q * p
-                db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3,
+                db_execute("INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                           (message.chat.id, t.upper(), p, q, amt, round(p*.95,2), round(p*1.1,2), round(p*1.2,2), round(p*1.3,2), p, datetime.now().isoformat()))
+                count += 1
+        bot.reply_to(message, f"✅ {count} positions importees")
+    except Exception as e:
+        bot.reply_to(message, f"❌ {e}")
+
+# ===== SURVEILLANCE =====
+def auto_scan():
+    movers = scan_all_movers()
+    gainers = [m for m in movers if m['change'] >= 20][:5]
+    if gainers:
+        msg = "🔔 *ALERTE AUTO*\n\n"
+        for m in gainers:
+            a = get_fast_analysis(m['ticker'])
+            stop = a['stop_loss'] if a else round(m['price'] * 0.95, 2)
+            msg += f"🔥 *{m['ticker']}* +{m['change']}%\n"
+            msg += f"   💰 ${m['price']:.3f} | 🛑 Stop ${stop}\n\n"
+        send_alert_to_all(msg)
+
+def monitor():
+    for r in db_fetchall("SELECT * FROM positions WHERE status='open'"):
+        curr = get_current_price(r[2])
+        if not curr:
+            continue
+        if curr > r[9]:
+            db_execute('UPDATE positions SET highest_price=? WHERE id=?', (curr, r[0]))
+        if curr >= r[3] * 1.05:
+            ns = round(curr * 0.97, 2)
+            if ns > r[5]:
+                db_execute('UPDATE positions SET stop_loss=? WHERE id=?', (ns, r[0]))
+        if curr <= r[5]:
+            try:
+                bot.send_message(r[1], f"🚨 *STOP* {r[2]} ${curr:.2f}", parse_mode='Markdown')
+            except:
+                pass
+        elif curr >= r[8]:
+            try:
+                bot.send_message(r[1], f"🎯 *TP3* {r[2]} ${curr:.2f}", parse_mode='Markdown')
+            except:
+                pass
+        elif curr >= r[7]:
+            try:
+                bot.send_message(r[1], f"🎯 *TP2* {r[2]} ${curr:.2f}", parse_mode='Markdown')
+            except:
+                pass
+        elif curr >= r[6]:
+            try:
+                bot.send_message(r[1], f"🎯 *TP1* {r[2]} ${curr:.2f}", parse_mode='Markdown')
+            except:
+                pass
+
+def run_scheduler():
+    schedule.every(15).minutes.do(auto_scan)
+    schedule.every(10).minutes.do(monitor)
+    while True:
+        schedule.run_pending()
+        time.sleep(10)
+
+# ===== FLASK =====
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        bot.process_new_updates([telebot.types.Update.de_json(request.get_data().decode('utf-8'))])
+        return 'ok', 200
+    return 'bad request', 400
+
+@app.route('/')
+def home():
+    return "Bot Trader Pro v6 - OK", 200
+
+if __name__ == '__main__':
+    print("Demarrage Bot Trader Pro v6...")
+    bot.remove_webhook()
+    time.sleep(0.5)
+    bot.set_webhook(url=WEBHOOK_URL + '/webhook')
+    print(f"Bot sur {WEBHOOK_URL}")
+    threading.Thread(target=run_scheduler, daemon=True).start()
+    app.run(host='0.0.0.0', port=PORT)
