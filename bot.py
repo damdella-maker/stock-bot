@@ -671,7 +671,7 @@ def home():
     return "Bot Trader Pro - Operationnel", 200
 
 # ===== DEMARRAGE =====
-if __name__ == '__main__':
+    if __name__ == '__main__':
     print("Demarrage du Bot Trader Pro...")
     bot.remove_webhook()
     time.sleep(0.5)
@@ -683,4 +683,5 @@ if __name__ == '__main__':
     print("Verification des alertes toutes les 5 minutes")
     print("Pret a trader !")
     
-    threading
+    threading.Thread(target=run_scheduler, daemon=True).start()
+    app.run(host='0.0.0.0', port=PORT)
