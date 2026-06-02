@@ -184,47 +184,130 @@ def scan_all_movers():
     return movers
     
 def get_tomorrow_recommendations():
+    """Recommandations pour demain - version rapide"""
     recommendations = []
+    
     for ticker in HIGH_GROWTH_STOCKS[:25]:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
+            
             current = info.get('currentPrice', info.get('regularMarketPrice', 0))
             previous = info.get('previousClose', 0)
+            
             if not current or not previous or current == 0:
                 continue
+            
+            # Variation du jour
             change_today = ((current - previous) / previous) * 100
+            
+            # Volume
             volume = info.get('volume', 0)
             avg_volume = info.get('averageVolume', 0)
             vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+            
+            # Tendance 50 jours (si disponible)
+            fifty_day_avg = info.get('fiftyDayAverage', 0)
+            two_hundred_day_avg = info.get('twoHundredDayAverage', 0)
+            
+            # Score
             score = 40
-            if change_today > 0: score += 10
-            if change_today > 3: score += 10
-            if vol_ratio > 1: score += 10
-            if vol_ratio > 2: score += 15
-            if volume > 500000: score += 15
+            
+            # Performance du jour
+            if change_today > 0:
+                score += 5
+            if change_today > 2:
+                score += 5
+            if change_today > 5:
+                score += 5
+            if change_today > 10:
+                score += 5
+            
+            # Volume
+            if vol_ratio > 1:
+                score += 5
+            if vol_ratio > 1.5:
+                score += 5
+            if vol_ratio > 2:
+                score += 5
+            
+            # Tendance long terme
+            if fifty_day_avg > 0 and current > fifty_day_avg:
+                score += 5
+            if two_hundred_day_avg > 0 and current > two_hundred_day_avg:
+                score += 5
+            if fifty_day_avg > two_hundred_day_avg > 0:
+                score += 5
+            
+            # Capitalisation (actions > 1B sont plus stables)
+            market_cap = info.get('marketCap', 0)
+            if market_cap > 1000000000:
+                score += 5
+            
+            # Beta (volatilité)
+            beta = info.get('beta', 1)
+            if beta and beta > 1:
+                score += 3  # Plus volatile = plus de potentiel
+            
             score = min(100, max(0, score))
-            stop = round(current * 0.93, 2)
-            tp1 = round(current * 1.07, 2)
-            tp2 = round(current * 1.15, 2)
-            if score >= 80: potential = "Tres eleve"
-            elif score >= 65: potential = "Eleve"
-            elif score >= 50: potential = "Modere"
-            else: potential = "Faible"
+            
+            # Stop et TP basés sur ATR estimé
+            atr_pct = 0.03  # 3% par défaut
+            if beta and beta > 1.5:
+                atr_pct = 0.05  # Plus volatil
+            elif beta and beta < 0.8:
+                atr_pct = 0.02  # Moins volatil
+            
+            stop = round(current * (1 - atr_pct * 2), 2)
+            tp1 = round(current * (1 + atr_pct * 2), 2)
+            tp2 = round(current * (1 + atr_pct * 4), 2)
+            
+            # Potentiel
+            if score >= 80:
+                potential = "Tres eleve"
+            elif score >= 65:
+                potential = "Eleve"
+            elif score >= 50:
+                potential = "Modere"
+            else:
+                potential = "Faible"
+            
             name = info.get('shortName', info.get('longName', ticker))
             sector = info.get('sector', 'N/A')
+            
+            # RSI estimé
+            rsi = info.get('fiftyTwoWeekHigh', 0)
+            if rsi > 0 and current > 0:
+                rsi_est = 50 + (current / rsi - 0.7) * 100
+                rsi_est = min(100, max(0, rsi_est))
+            else:
+                rsi_est = 50
+            
             recommendations.append({
-                'ticker': ticker, 'name': name, 'sector': sector,
-                'price': round(current, 3), 'change_today': round(change_today, 2),
-                'change_5d': 0, 'rsi': 0, 'vol_ratio': round(vol_ratio, 1),
-                'score': score, 'stop': stop, 'tp1': tp1, 'tp2': tp2,
-                'potential': potential, 'trend': 'N/A'
+                'ticker': ticker,
+                'name': name,
+                'sector': sector,
+                'price': round(current, 3),
+                'change_today': round(change_today, 2),
+                'change_5d': round(change_today, 2),
+                'rsi': round(rsi_est, 1),
+                'vol_ratio': round(vol_ratio, 1),
+                'score': score,
+                'stop': stop,
+                'tp1': tp1,
+                'tp2': tp2,
+                'potential': potential,
+                'trend': 'Haussiere' if fifty_day_avg > 0 and current > fifty_day_avg else 'Neutre',
+                'ma5': 0,
+                'ma10': 0
             })
         except:
             pass
+    
+    # Trier par score
     recommendations.sort(key=lambda x: x['score'], reverse=True)
     return recommendations[:5]
-
+    
 def send_alert_to_all(msg):
     for cid in get_all_subscribers():
         try:
