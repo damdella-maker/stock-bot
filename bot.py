@@ -257,40 +257,15 @@ def get_fast_analysis(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
+        
         current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
         if not current_price or current_price == 0:
             return None
-        previous_close = info.get('previousClose', current_price)
-        change_pct = ((current_price - previous_close) / previous_close) * 100
-        volume = info.get('volume', 0)
-        avg_volume = info.get('averageVolume', 0)
-        vol_ratio = volume / avg_volume if avg_volume > 0 else 1
-        score = 50
-        if change_pct > 0: score += 10
-        if change_pct > 5: score += 10
-        if vol_ratio > 1: score += 10
-        if vol_ratio > 2: score += 10
-        if volume > 1000000: score += 10
-        score = min(100, score)
-        atr = current_price * 0.03
-        stop_loss = round(current_price - 2 * atr, 2)
-        tp1 = round(current_price + 2 * atr, 2)
-        tp2 = round(current_price + 4 * atr, 2)
-        tp3 = round(current_price + 6 * atr, 2)
-        name = info.get('shortName', info.get('longName', ticker))
-        isin = info.get('isin', 'N/A')
-        sector = info.get('sector', 'N/A')
-        return {
-            'ticker': ticker, 'name': name[:40], 'isin': isin, 'sector': sector,
-            'price': round(current_price, 3), 'change_pct': round(change_pct, 2),
-            'vol_ratio': round(vol_ratio, 1), 'volume': volume, 'score': score,
-            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-            'ma20': 0, 'macd': 0, 'macd_signal': 0, 'rsi': 0,
-            'avg_volume': avg_volume, 'atr': round(atr, 2),
-            'risk_reward': 2.0, 'potential_10': 50, 'potential_20': 30, 'potential_30': 20,
-            'industry': sector, 'market_cap': 0
-        }
-    except:
+        
+        # ... reste de la fonction ...
+        
+    except Exception as e:
+        print(f"Erreur get_fast_analysis {ticker}: {e}")
         return None
 
 def scan_all_movers():
