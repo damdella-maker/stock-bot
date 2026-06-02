@@ -1,6 +1,5 @@
 import os
 import telebot
-import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -14,9 +13,7 @@ from flask import Flask, request
 from telebot import types
 import sqlite3
 
-# ===== CONFIGURATION =====
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
-FINNHUB_KEY = os.environ.get('FINNHUB_KEY')
 PORT = int(os.environ.get('PORT', 10000))
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://votre-service.onrender.com')
 
@@ -24,7 +21,6 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 DB_PATH = 'trading_bot.db'
 
-# ===== BASE DE DONNEES =====
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -77,179 +73,21 @@ def add_subscriber(chat_id):
 def get_all_subscribers():
     return [r[0] for r in db_fetchall('SELECT chat_id FROM subscribers')]
 
-@bot.message_handler(commands=['achat'])
-def cmd_achat(message):
-    """
-    Ajoute un achat rapide : /achat TICKER PRIX MONTANT
-    Exemple : /achat AAPL 150.50 100
-    """
-    try:
-        parts = message.text.split()
-        ticker = parts[1].upper()
-        buy_price = float(parts[2].replace(',', '.'))
-        amount = float(parts[3].replace(',', '.'))
-    except:
-        bot.reply_to(message, "❌ Format : /achat TICKER PRIX MONTANT\nExemple : /achat AAPL 150.50 100")
-        return
-    
-    # Calculs
-    qty = amount / buy_price
-    a = get_fast_analysis(ticker)
-    stop = a['stop_loss'] if a else round(buy_price * 0.90, 2)  # Stop à -10%
-    tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
-    tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
-    tp3 = a['tp3'] if a else round(buy_price * 1.30, 2)
-    
-    # Sauvegarder dans la base
-    db_execute('''INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-        (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
-    
-    # Message de confirmation
-    current = get_current_price(ticker)
-    if current:
-        variation = ((current - buy_price) / buy_price) * 100
-        status = "🟢" if variation >= 0 else "🔴"
-    else:
-        variation = 0
-        status = "⚪"
-    
-    msg = f"""✅ *ACHAT ENREGISTRE*
-
-📊 *{ticker}*
-💰 Montant : {amount:.2f}€
-💵 Prix d'achat : ${buy_price:.3f}
-📦 Quantité : {qty:.4f} actions
-{status} Prix actuel : ${current:.3f} ({variation:+.2f}%)""" if current else f"""✅ *ACHAT ENREGISTRE*
-
-📊 *{ticker}*
-💰 Montant : {amount:.2f}€
-💵 Prix d'achat : ${buy_price:.3f}
-📦 Quantité : {qty:.4f} actions"""
-
-    msg += f"""
-
-🛡️ *Protection :*
-• 🛑 Stop-Loss (-10%) : ${stop}
-• 💸 Perte max : {amount * 0.10:.2f}€
-
-🎯 *Objectifs :*
-• TP1 (+10%) : ${tp1} → Gain : {amount * 0.10:.2f}€
-• TP2 (+20%) : ${tp2} → Gain : {amount * 0.20:.2f}€
-• TP3 (+30%) : ${tp3} → Gain : {amount * 0.30:.2f}€
-
-🔍 *Surveillance active*
-⚠️ Alerte si baisse > 10%
-📊 /portfolio pour suivre"""
-    
-    bot.reply_to(message, msg, parse_mode='Markdown')
-    
-# ===== WATCHLIST =====
 HIGH_GROWTH_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'NFLX',
-    'CRM', 'ADBE', 'INTC', 'QCOM', 'AVGO', 'COIN', 'MARA', 'RIOT', 'MSTR',
-    'HIVE', 'BTBT', 'CLSK', 'HUT', 'WULF', 'CIFR', 'IREN', 'CORZ',
-    'PLTR', 'AI', 'BBAI', 'SOUN', 'PATH', 'C3AI', 'BIGC', 'VERI',
-    'NIO', 'XPEV', 'LI', 'RIVN', 'LCID', 'CHPT', 'PLUG', 'FCEL', 'BLDP',
-    'QS', 'GOEV', 'FSR', 'NKLA', 'WKHS', 'HYLN',
-    'MRNA', 'PFE', 'BNTX', 'NVAX', 'VXRT', 'INO', 'OCGN', 'BNGO', 'HOTH',
-    'GME', 'AMC', 'BB', 'SPCE', 'CLOV', 'WISH', 'MVIS',
-    'LASE', 'HKD', 'TOP', 'GNS', 'NUWE', 'SOPA', 'AUUD', 'GFAI',
-    'KSCP', 'KALA', 'EFTR', 'CJJD', 'JXJT', 'YQ', 'CLEU', 'POL',
-    'ICU', 'TTOO', 'EOSE', 'AMPX',
-    'AFRM', 'UPST', 'SOFI', 'HOOD', 'RBLX', 'SQ', 'PYPL', 'SHOP',
-    'BABA', 'JD', 'BIDU', 'BILI', 'TME', 'PDD', 'DQ', 'JKS', 'CAN', 'EH',
-    'MU', 'AMAT', 'LRCX', 'KLAC', 'TSM', 'MRVL',
-    'SNDL', 'TLRY', 'ACB', 'CGC', 'OGI', 'CRON',
-    'BA', 'CCL', 'AAL', 'UAL', 'DAL', 'M', 'W', 'CVNA',
-    'SNAP', 'UBER', 'ZM', 'CRWD', 'DDOG', 'SNOW', 'MDB', 'ZS', 'NET',
-    'FSLY', 'U', 'DASH', 'ABNB', 'PTON', 'BYND', 'DKNG', 'PINS',
-    'LITM', 'SHPW', 'PEGY', 'BURU', 'FOXO', 'VTAK', 'RSLS', 'GCTK', 'IMNN'
+    'PLTR', 'COIN', 'MARA', 'RIOT', 'NIO', 'XPEV', 'LI', 'RIVN', 'LCID',
+    'GME', 'AMC', 'SPCE', 'SNDL', 'TLRY', 'ACB', 'CGC', 'BA', 'CCL', 'AAL',
+    'AFRM', 'UPST', 'SOFI', 'HOOD', 'BABA', 'JD', 'BIDU', 'MRNA', 'PFE',
+    'UBER', 'ZM', 'CRWD', 'SNAP', 'DASH', 'ABNB', 'PTON', 'DKNG', 'PINS',
+    'LASE', 'HKD', 'TOP', 'GNS', 'NUWE', 'SOPA', 'AUUD', 'GFAI'
 ]
 HIGH_GROWTH_STOCKS = list(set(HIGH_GROWTH_STOCKS))
-
-def check_critical_drops():
-    """Vérifie les baisses de plus de 10% sur toutes les positions"""
-    rows = db_fetchall("SELECT * FROM positions WHERE status='open'")
-    
-    for r in rows:
-        curr = get_current_price(r[2])
-        if not curr:
-            continue
-        
-        # Calculer la perte en pourcentage
-        loss_pct = ((curr / r[3]) - 1) * 100
-        
-        # Si baisse > 10%, envoyer une alerte
-        if loss_pct <= -10:
-            amount = r[5]
-            current_value = r[4] * (curr / r[3])
-            loss_amount = current_value - amount
-            
-            alert_msg = f"""🚨 *ALERTE BAISSE CRITIQUE*
-
-📊 *{r[2]}*
-📉 Baisse : {loss_pct:.1f}%
-💰 Investi : {amount:.2f}€
-💸 Valeur actuelle : {current_value:.2f}€
-🔴 Perte : {loss_amount:.2f}€
-
-🛑 Stop-Loss actuel : ${r[5]}
-⚠️ *Envisagez de vendre rapidement !*
-/vendre {r[2]}"""
-            
-            try:
-                bot.send_message(r[1], alert_msg, parse_mode='Markdown')
-            except:
-                pass
-
-def hourly_top_movers():
-    """Envoie les tops mouvements haussiers toutes les heures"""
-    now = datetime.now()
-    
-    # N'envoyer qu'entre 8h et 21h
-    if now.hour < 8 or now.hour >= 21:
-        return
-    
-    movers = scan_all_movers()
-    gainers = [m for m in movers if m['change'] > 2][:5]
-    
-    if not gainers:
-        return
-    
-    msg = f"📊 *TOP MOUVEMENTS HORAIRE - {now.strftime('%H:%M')}*\n\n"
-    
-    for i, m in enumerate(gainers, 1):
-        emoji = "🔥" if m['change'] > 10 else "🟢" if m['change'] > 5 else "🟡"
-        msg += f"*{i}. {m['ticker']}* {emoji} +{m['change']}%\n"
-        msg += f"   💰 ${m['price']:.3f} | Vol: {m['volume']:,}\n\n"
-    
-    msg += "📊 /analyse TICKER pour le detail"
-    
-    for subscriber in get_all_subscribers():
-        try:
-            bot.send_message(subscriber, msg, parse_mode='Markdown')
-        except:
-            pass
-
-# ===== OUTILS =====
-def get_stock_info_fast(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return (info.get('longName', info.get('shortName', ticker)),
-                info.get('isin', 'N/A'),
-                info.get('sector', 'N/A'),
-                info.get('industry', 'N/A'),
-                info.get('marketCap', 0))
-    except:
-        return (ticker, 'N/A', 'N/A', 'N/A', 0)
 
 def get_current_price(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        return info.get('currentPrice', info.get('regularMarketPrice', info.get('ask', 0)))
+        return info.get('currentPrice', info.get('regularMarketPrice', 0))
     except:
         return None
 
@@ -257,15 +95,40 @@ def get_fast_analysis(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        
         current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
         if not current_price or current_price == 0:
             return None
-        
-        # ... reste de la fonction ...
-        
-    except Exception as e:
-        print(f"Erreur get_fast_analysis {ticker}: {e}")
+        previous_close = info.get('previousClose', current_price)
+        change_pct = ((current_price - previous_close) / previous_close) * 100
+        volume = info.get('volume', 0)
+        avg_volume = info.get('averageVolume', 0)
+        vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+        score = 50
+        if change_pct > 0: score += 10
+        if change_pct > 5: score += 10
+        if vol_ratio > 1: score += 10
+        if vol_ratio > 2: score += 10
+        if volume > 1000000: score += 10
+        score = min(100, score)
+        atr = current_price * 0.03
+        stop_loss = round(current_price - 2 * atr, 2)
+        tp1 = round(current_price + 2 * atr, 2)
+        tp2 = round(current_price + 4 * atr, 2)
+        tp3 = round(current_price + 6 * atr, 2)
+        name = info.get('shortName', info.get('longName', ticker))
+        isin = info.get('isin', 'N/A')
+        sector = info.get('sector', 'N/A')
+        return {
+            'ticker': ticker, 'name': str(name)[:40], 'isin': isin, 'sector': sector,
+            'price': round(current_price, 3), 'change_pct': round(change_pct, 2),
+            'vol_ratio': round(vol_ratio, 1), 'volume': volume, 'score': score,
+            'stop_loss': stop_loss, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+            'ma20': 0, 'macd': 0, 'macd_signal': 0, 'rsi': 0,
+            'avg_volume': avg_volume, 'atr': round(atr, 2),
+            'risk_reward': 2.0, 'potential_10': 50, 'potential_20': 30, 'potential_30': 20,
+            'industry': sector, 'market_cap': 0
+        }
+    except:
         return None
 
 def scan_all_movers():
@@ -281,139 +144,56 @@ def scan_all_movers():
                 volume = info.get('volume', 0)
                 name = info.get('shortName', ticker)
                 movers.append({
-                    'ticker': ticker, 'name': name[:30],
+                    'ticker': ticker, 'name': str(name)[:30],
                     'price': current, 'change': round(change, 2), 'volume': volume
                 })
         except:
             pass
     movers.sort(key=lambda x: x['change'], reverse=True)
     return movers
-    
+
 def get_tomorrow_recommendations():
-    """Recommandations pour demain - version rapide"""
     recommendations = []
-    
     for ticker in HIGH_GROWTH_STOCKS[:25]:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
-            
             current = info.get('currentPrice', info.get('regularMarketPrice', 0))
             previous = info.get('previousClose', 0)
-            
             if not current or not previous or current == 0:
                 continue
-            
-            # Variation du jour
             change_today = ((current - previous) / previous) * 100
-            
-            # Volume
             volume = info.get('volume', 0)
             avg_volume = info.get('averageVolume', 0)
             vol_ratio = volume / avg_volume if avg_volume > 0 else 1
-            
-            # Tendance 50 jours (si disponible)
-            fifty_day_avg = info.get('fiftyDayAverage', 0)
-            two_hundred_day_avg = info.get('twoHundredDayAverage', 0)
-            
-            # Score
             score = 40
-            
-            # Performance du jour
-            if change_today > 0:
-                score += 5
-            if change_today > 2:
-                score += 5
-            if change_today > 5:
-                score += 5
-            if change_today > 10:
-                score += 5
-            
-            # Volume
-            if vol_ratio > 1:
-                score += 5
-            if vol_ratio > 1.5:
-                score += 5
-            if vol_ratio > 2:
-                score += 5
-            
-            # Tendance long terme
-            if fifty_day_avg > 0 and current > fifty_day_avg:
-                score += 5
-            if two_hundred_day_avg > 0 and current > two_hundred_day_avg:
-                score += 5
-            if fifty_day_avg > two_hundred_day_avg > 0:
-                score += 5
-            
-            # Capitalisation (actions > 1B sont plus stables)
-            market_cap = info.get('marketCap', 0)
-            if market_cap > 1000000000:
-                score += 5
-            
-            # Beta (volatilité)
-            beta = info.get('beta', 1)
-            if beta and beta > 1:
-                score += 3  # Plus volatile = plus de potentiel
-            
+            if change_today > 0: score += 10
+            if change_today > 3: score += 10
+            if vol_ratio > 1: score += 10
+            if vol_ratio > 2: score += 15
+            if volume > 500000: score += 15
             score = min(100, max(0, score))
-            
-            # Stop et TP basés sur ATR estimé
-            atr_pct = 0.03  # 3% par défaut
-            if beta and beta > 1.5:
-                atr_pct = 0.05  # Plus volatil
-            elif beta and beta < 0.8:
-                atr_pct = 0.02  # Moins volatil
-            
-            stop = round(current * (1 - atr_pct * 2), 2)
-            tp1 = round(current * (1 + atr_pct * 2), 2)
-            tp2 = round(current * (1 + atr_pct * 4), 2)
-            
-            # Potentiel
-            if score >= 80:
-                potential = "Tres eleve"
-            elif score >= 65:
-                potential = "Eleve"
-            elif score >= 50:
-                potential = "Modere"
-            else:
-                potential = "Faible"
-            
+            stop = round(current * 0.93, 2)
+            tp1 = round(current * 1.07, 2)
+            tp2 = round(current * 1.15, 2)
+            if score >= 80: potential = "Tres eleve"
+            elif score >= 65: potential = "Eleve"
+            elif score >= 50: potential = "Modere"
+            else: potential = "Faible"
             name = info.get('shortName', info.get('longName', ticker))
             sector = info.get('sector', 'N/A')
-            
-            # RSI estimé
-            rsi = info.get('fiftyTwoWeekHigh', 0)
-            if rsi > 0 and current > 0:
-                rsi_est = 50 + (current / rsi - 0.7) * 100
-                rsi_est = min(100, max(0, rsi_est))
-            else:
-                rsi_est = 50
-            
             recommendations.append({
-                'ticker': ticker,
-                'name': name,
-                'sector': sector,
-                'price': round(current, 3),
-                'change_today': round(change_today, 2),
-                'change_5d': round(change_today, 2),
-                'rsi': round(rsi_est, 1),
-                'vol_ratio': round(vol_ratio, 1),
-                'score': score,
-                'stop': stop,
-                'tp1': tp1,
-                'tp2': tp2,
-                'potential': potential,
-                'trend': 'Haussiere' if fifty_day_avg > 0 and current > fifty_day_avg else 'Neutre',
-                'ma5': 0,
-                'ma10': 0
+                'ticker': ticker, 'name': str(name), 'sector': sector,
+                'price': round(current, 3), 'change_today': round(change_today, 2),
+                'change_5d': 0, 'rsi': 0, 'vol_ratio': round(vol_ratio, 1),
+                'score': score, 'stop': stop, 'tp1': tp1, 'tp2': tp2,
+                'potential': potential, 'trend': 'N/A'
             })
         except:
             pass
-    
-    # Trier par score
     recommendations.sort(key=lambda x: x['score'], reverse=True)
     return recommendations[:5]
-    
+
 def send_alert_to_all(msg):
     for cid in get_all_subscribers():
         try:
@@ -423,37 +203,25 @@ def send_alert_to_all(msg):
 
 # ===== COMMANDES =====
 @bot.message_handler(commands=['start'])
-    def cmd_start(message):
-                add_subscriber(message.chat.id)
+def cmd_start(message):
+    add_subscriber(message.chat.id)
     msg = "🚀 *TRADER PRO V7*\n\n"
-    msg += "✅ *Bot actif !*\n\n"
-    msg += "📊 *Scan & Analyse :*\n"
-    msg += "/rapide - Top gainers instantane\n"
-    msg += "/scan - Scan avec filtre\n"
-    msg += "/scan20 - Potentiel 20-50%\n"
-    msg += "/scan50 - Potentiel >50%\n"
-    msg += "/allmovers - Tous les mouvements\n"
-    msg += "/analyse TICKER - Rapport complet\n"
-    msg += "/explosive - Top opportunites\n"
-    msg += "📅 /demain - Top 5 pour demain\n\n"
-    msg += "💼 *Trading :*\n"
-    msg += "/achat TICKER PRIX MONTANT - Achat rapide\n"
-    msg += "/portfolio - Positions avec P&L\n"
-    msg += "/vendre TICKER - Fermer une position\n\n"
-    msg += "📈 *Marche :*\n"
-    msg += "/marche - Indices en direct\n\n"
-    msg += "📋 *Suivi :*\n"
-    msg += "/historique - Trades fermes\n"
-    msg += "/stats - Performance\n"
-    msg += "/alerte TICKER PRIX - Creer alerte\n"
-    msg += "/import_csv - Import Trading212\n\n"
-    msg += "⚙️ *Parametres :*\n"
-    msg += "/setrange MIN MAX - Votre filtre\n"
-    msg += "/aide - Guide complet\n\n"
-    msg += "🔔 *Notifications auto :*\n"
-    msg += "• Toutes les heures : top mouvements\n"
-    msg += "• Alerte si baisse > 10%\n"
-    msg += "• Surveillance positions"
+    msg += "✅ Bot actif !\n\n"
+    msg += "📊 /rapide - Top gainers\n"
+    msg += "📊 /scan - Scan filtre\n"
+    msg += "📊 /scan20 - Potentiel 20-50%\n"
+    msg += "📊 /scan50 - Potentiel >50%\n"
+    msg += "📊 /allmovers - Tous mouvements\n"
+    msg += "📊 /analyse TICKER - Rapport\n"
+    msg += "💥 /explosive - Top opportunites\n"
+    msg += "📈 /marche - Indices\n"
+    msg += "📅 /demain - Top 5 demain\n"
+    msg += "📝 /achat TICKER PRIX MONTANT\n"
+    msg += "💼 /portfolio - Positions\n"
+    msg += "📋 /historique - Historique\n"
+    msg += "📊 /stats - Performance\n"
+    msg += "⚙️ /setrange MIN MAX - Filtre\n"
+    msg += "📚 /aide - Guide"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['aide'])
@@ -554,57 +322,24 @@ def cmd_scan(message):
 def cmd_demain(message):
     bot.send_chat_action(message.chat.id, 'typing')
     wait_msg = bot.reply_to(message, "🔮 *Analyse pour demain...*", parse_mode='Markdown')
-    
-    try:
-        recommendations = get_tomorrow_recommendations()
-    except Exception as e:
-        bot.edit_message_text(
-            f"❌ Erreur lors de l'analyse : {str(e)[:50]}",
-            chat_id=message.chat.id,
-            message_id=wait_msg.message_id
-        )
+    recommendations = get_tomorrow_recommendations()
+    if not recommendations:
+        bot.edit_message_text("❌ Analyse impossible", chat_id=message.chat.id, message_id=wait_msg.message_id)
         return
-    
-    if not recommendations or len(recommendations) == 0:
-        bot.edit_message_text(
-            "❌ *Aucune recommandation disponible*\n\n"
-            "Le marche est peut-etre ferme ou les donnees sont indisponibles.\n\n"
-            "💡 Essayez /rapide pour voir les mouvements du jour.",
-            chat_id=message.chat.id,
-            message_id=wait_msg.message_id,
-            parse_mode='Markdown'
-        )
-        return
-    
     tomorrow = (datetime.now() + timedelta(days=1)).strftime('%d/%m/%Y')
     msg = f"🔮 *TOP 5 POUR DEMAIN - {tomorrow}*\n\n"
-    msg += "═" * 25 + "\n\n"
-    
     for i, r in enumerate(recommendations, 1):
-        if r['score'] >= 80:
-            stars, reco = "⭐⭐⭐⭐⭐", "ACHAT FORT"
-        elif r['score'] >= 65:
-            stars, reco = "⭐⭐⭐⭐", "ACHAT"
-        elif r['score'] >= 50:
-            stars, reco = "⭐⭐⭐", "SURVEILLER"
-        else:
-            stars, reco = "⭐⭐", "ATTENDRE"
-        
-        msg += f"*{i}. {r['name']} ({r['ticker']})*\n"
-        msg += f"   {stars} Score: {r['score']}/100 {reco}\n"
-        msg += f"   💰 ${r['price']:.3f} | 📈 +{r['change_today']}% aujourd'hui\n"
-        msg += f"   📊 Vol: {r['vol_ratio']}x | RSI: {r['rsi']}\n"
-        msg += f"   🛑 Stop: ${r['stop']} | 🎯 TP: ${r['tp1']}\n"
-        msg += f"   🔮 Potentiel: *{r['potential']}*\n\n"
-    
-    msg += "⚠️ Analyse basee sur les donnees de marche actuelles."
-    
-    bot.edit_message_text(
-        msg,
-        chat_id=message.chat.id,
-        message_id=wait_msg.message_id,
-        parse_mode='Markdown'
-    )
+        if r['score'] >= 80: stars, reco = "⭐⭐⭐⭐⭐", "ACHAT FORT"
+        elif r['score'] >= 65: stars, reco = "⭐⭐⭐⭐", "ACHAT"
+        elif r['score'] >= 50: stars, reco = "⭐⭐⭐", "SURVEILLER"
+        else: stars, reco = "⭐⭐", "ATTENDRE"
+        msg += f"*{i}. {r['ticker']}* {stars} {reco}\n"
+        msg += f"   Score: {r['score']}/100 | 💰 ${r['price']:.3f}\n"
+        msg += f"   📈 +{r['change_today']}% | RSI: {r['rsi']}\n"
+        msg += f"   🛑 Stop: ${r['stop']} | 🎯 TP: ${r['tp1']}\n\n"
+    msg += "📊 /analyse TICKER pour le detail"
+    bot.edit_message_text(msg, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode='Markdown')
+
 @bot.message_handler(commands=['analyse'])
 def cmd_analyse(message):
     try:
@@ -617,18 +352,15 @@ def cmd_analyse(message):
     if not a:
         bot.reply_to(message, f"❌ Donnees indisponibles pour {ticker}")
         return
-    msg = f"""📊 *{a['name']} ({a['ticker']})*
-🔖 ISIN: `{a['isin']}`
-
-⭐ Score: {a['score']}/100
-💰 Prix: ${a['price']}
-📈 Variation: {a['change_pct']:+.2f}%
-
-📊 RSI: {a['rsi']} | MACD: {a['macd']}
-📏 Vol: {a['vol_ratio']}x ({a['volume']:,})
-
-🛡️ Stop: ${a['stop_loss']}
-🎯 TP1: ${a['tp1']} | TP2: ${a['tp2']} | TP3: ${a['tp3']}"""
+    msg = f"📊 *{a['name']} ({a['ticker']})*\n"
+    msg += f"🔖 ISIN: `{a['isin']}`\n\n"
+    msg += f"⭐ Score: {a['score']}/100\n"
+    msg += f"💰 Prix: ${a['price']}\n"
+    msg += f"📈 Variation: {a['change_pct']:+.2f}%\n\n"
+    msg += f"📊 RSI: {a['rsi']} | MACD: {a['macd']}\n"
+    msg += f"📏 Vol: {a['vol_ratio']}x ({a['volume']:,})\n\n"
+    msg += f"🛡️ Stop: ${a['stop_loss']}\n"
+    msg += f"🎯 TP1: ${a['tp1']} | TP2: ${a['tp2']} | TP3: ${a['tp3']}"
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("🛒 ACHETER", callback_data=f"buy_{ticker}_{a['price']}"),
@@ -674,10 +406,37 @@ def process_price(message, ticker, amount):
     tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
     tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
     tp3 = a['tp3'] if a else round(buy_price * 1.30, 2)
-    db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+    db_execute("INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
     loss = amount - (stop / buy_price * amount)
     msg = f"✅ *POSITION OUVERTE*\n📊 {ticker}\n💰 {amount:.2f}€ | ${buy_price:.3f}\n📦 {qty:.4f} actions\n🛑 Stop ${stop} (perte max {loss:.2f}€)\n🎯 TP1 ${tp1} | TP2 ${tp2} | TP3 ${tp3}"
+    bot.reply_to(message, msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['achat'])
+def cmd_achat(message):
+    try:
+        parts = message.text.split()
+        ticker = parts[1].upper()
+        buy_price = float(parts[2].replace(',', '.'))
+        amount = float(parts[3].replace(',', '.'))
+    except:
+        bot.reply_to(message, "❌ /achat TICKER PRIX MONTANT\nEx: /achat AAPL 150 100")
+        return
+    qty = amount / buy_price
+    a = get_fast_analysis(ticker)
+    stop = a['stop_loss'] if a else round(buy_price * 0.90, 2)
+    tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
+    tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
+    tp3 = a['tp3'] if a else round(buy_price * 1.30, 2)
+    db_execute("INSERT INTO positions (chat_id, ticker, buy_price, quantity, amount, stop_loss, take_profit1, take_profit2, take_profit3, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+               (message.chat.id, ticker, buy_price, qty, amount, stop, tp1, tp2, tp3, buy_price, datetime.now().isoformat()))
+    curr = get_current_price(ticker)
+    if curr:
+        var = ((curr - buy_price) / buy_price) * 100
+        status = "🟢" if var >= 0 else "🔴"
+        msg = f"✅ *ACHAT ENREGISTRE*\n📊 {ticker}\n💰 {amount:.2f}€ | ${buy_price:.3f}\n📦 {qty:.4f} actions\n{status} Prix actuel: ${curr:.3f} ({var:+.2f}%)\n\n🛑 Stop: ${stop} | 🎯 TP1: ${tp1}"
+    else:
+        msg = f"✅ *ACHAT ENREGISTRE*\n📊 {ticker}\n💰 {amount:.2f}€ | ${buy_price:.3f}\n📦 {qty:.4f} actions\n\n🛑 Stop: ${stop} | 🎯 TP1: ${tp1}"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['explosive'])
@@ -742,14 +501,14 @@ def cmd_vendre(message):
     curr = get_current_price(ticker) or row[3]
     val = row[4] * (curr / row[3])
     pnl = val - row[5]
-    db_execute('INSERT INTO trades (chat_id, ticker, buy_price, sell_price, quantity, amount, profit_loss, profit_loss_pct, close_date) VALUES (?,?,?,?,?,?,?,?,?)',
+    db_execute("INSERT INTO trades (chat_id, ticker, buy_price, sell_price, quantity, amount, profit_loss, profit_loss_pct, close_date) VALUES (?,?,?,?,?,?,?,?,?)",
                (message.chat.id, ticker, row[3], curr, row[4], row[5], pnl, (curr/row[3]-1)*100, datetime.now().isoformat()))
-    db_execute('UPDATE positions SET status=? WHERE id=?', ('closed', row[0]))
+    db_execute("UPDATE positions SET status=? WHERE id=?", ('closed', row[0]))
     bot.reply_to(message, f"✅ *{ticker}* vendu\n{'🟢' if pnl>=0 else '🔴'} P&L: {pnl:+.2f}€", parse_mode='Markdown')
 
 @bot.message_handler(commands=['historique'])
 def cmd_historique(message):
-    rows = db_fetchall('SELECT * FROM trades WHERE chat_id=? ORDER BY close_date DESC LIMIT 10', (message.chat.id,))
+    rows = db_fetchall("SELECT * FROM trades WHERE chat_id=? ORDER BY close_date DESC LIMIT 10", (message.chat.id,))
     if not rows:
         bot.reply_to(message, "📋 Vide")
         return
@@ -760,7 +519,7 @@ def cmd_historique(message):
 
 @bot.message_handler(commands=['stats'])
 def cmd_stats(message):
-    rows = db_fetchall('SELECT profit_loss FROM trades WHERE chat_id=?', (message.chat.id,))
+    rows = db_fetchall("SELECT profit_loss FROM trades WHERE chat_id=?", (message.chat.id,))
     if not rows:
         bot.reply_to(message, "📊 Pas de stats")
         return
@@ -773,7 +532,7 @@ def cmd_stats(message):
 def cmd_alerte(message):
     try:
         _, ticker, price = message.text.split()
-        db_execute('INSERT INTO alerts (chat_id, ticker, target_price, date) VALUES (?,?,?,?)', (message.chat.id, ticker.upper(), float(price), datetime.now().isoformat()))
+        db_execute("INSERT INTO alerts (chat_id, ticker, target_price, date) VALUES (?,?,?,?)", (message.chat.id, ticker.upper(), float(price), datetime.now().isoformat()))
         bot.reply_to(message, f"🔔 Alerte {ticker.upper()} a ${price}")
     except:
         bot.reply_to(message, "❌ /alerte AAPL 200")
@@ -848,25 +607,42 @@ def monitor():
             except:
                 pass
 
+def check_critical_drops():
+    for r in db_fetchall("SELECT * FROM positions WHERE status='open'"):
+        curr = get_current_price(r[2])
+        if not curr:
+            continue
+        loss_pct = ((curr / r[3]) - 1) * 100
+        if loss_pct <= -10:
+            amount = r[5]
+            current_value = r[4] * (curr / r[3])
+            loss_amount = current_value - amount
+            try:
+                bot.send_message(r[1], f"🚨 *BAISSE CRITIQUE*\n{r[2]} {loss_pct:.1f}%\nPerte: {loss_amount:.2f}€", parse_mode='Markdown')
+            except:
+                pass
+
+def hourly_top_movers():
+    now = datetime.now()
+    if now.hour < 8 or now.hour >= 21:
+        return
+    movers = scan_all_movers()
+    gainers = [m for m in movers if m['change'] > 2][:5]
+    if gainers:
+        msg = f"📊 *TOP MOUVEMENTS - {now.strftime('%H:%M')}*\n\n"
+        for m in gainers:
+            msg += f"🔥 *{m['ticker']}* +{m['change']}%\n"
+        send_alert_to_all(msg)
+
 def run_scheduler():
-    """Planificateur de toutes les taches"""
-    # Toutes les 15 minutes : scan auto
     schedule.every(15).minutes.do(auto_scan)
-    
-    # Toutes les 10 minutes : surveillance positions
     schedule.every(10).minutes.do(monitor)
-    
-    # Toutes les 5 minutes : vérification baisses critiques
     schedule.every(5).minutes.do(check_critical_drops)
-    
-    # Toutes les heures : top mouvements
     schedule.every(60).minutes.do(hourly_top_movers)
-    
     while True:
         schedule.run_pending()
         time.sleep(10)
 
-# ===== FLASK =====
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -876,10 +652,10 @@ def webhook():
 
 @app.route('/')
 def home():
-    return "Bot Trader Pro v6 - OK", 200
+    return "Bot Trader Pro v7 - OK", 200
 
 if __name__ == '__main__':
-    print("Demarrage Bot Trader Pro v6...")
+    print("Demarrage Bot Trader Pro v7...")
     bot.remove_webhook()
     time.sleep(0.5)
     bot.set_webhook(url=WEBHOOK_URL + '/webhook')
