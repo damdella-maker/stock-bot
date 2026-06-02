@@ -14,7 +14,6 @@ from flask import Flask, request
 from telebot import types
 import sqlite3
 
-# ===== CONFIGURATION =====
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FINNHUB_KEY = os.environ.get('FINNHUB_KEY')
 PORT = int(os.environ.get('PORT', 10000))
@@ -22,32 +21,23 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://votre-service.onrender.com'
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
-
-# ===== BASE DE DONNEES =====
 DB_PATH = 'trading_bot.db'
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS positions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id INTEGER, ticker TEXT, buy_price REAL, quantity INTEGER,
-        stop_loss REAL, take_profit1 REAL, take_profit2 REAL,
-        highest_price REAL, status TEXT DEFAULT 'open', date TEXT
-    )''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, ticker TEXT,
+        buy_price REAL, quantity INTEGER, stop_loss REAL, take_profit1 REAL,
+        take_profit2 REAL, highest_price REAL, status TEXT DEFAULT 'open', date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id INTEGER, ticker TEXT, buy_price REAL, sell_price REAL,
-        quantity INTEGER, profit_loss REAL, profit_loss_pct REAL, close_date TEXT
-    )''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, ticker TEXT,
+        buy_price REAL, sell_price REAL, quantity INTEGER, profit_loss REAL,
+        profit_loss_pct REAL, close_date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id INTEGER, ticker TEXT, target_price REAL,
-        active INTEGER DEFAULT 1, date TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS subscribers (
-        chat_id INTEGER PRIMARY KEY
-    )''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, ticker TEXT,
+        target_price REAL, active INTEGER DEFAULT 1, date TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS subscribers (chat_id INTEGER PRIMARY KEY)''')
     conn.commit()
     conn.close()
 
@@ -80,608 +70,284 @@ def add_subscriber(chat_id):
     db_execute('INSERT OR IGNORE INTO subscribers (chat_id) VALUES (?)', (chat_id,))
 
 def get_all_subscribers():
-    rows = db_fetchall('SELECT chat_id FROM subscribers')
-    return [r[0] for r in rows]
+    return [r[0] for r in db_fetchall('SELECT chat_id FROM subscribers')]
 
-# ===== WATCHLIST =====
 WATCHLIST = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'NFLX',
-    'SNAP', 'UBER', 'ROKU', 'ZM', 'CRWD', 'PLTR', 'GME', 'AMC',
-    'RIVN', 'LCID', 'MARA', 'RIOT', 'COIN', 'NIO', 'XPEV', 'LI',
+    'PLTR', 'GME', 'AMC', 'MARA', 'RIOT', 'COIN', 'NIO', 'XPEV', 'LI',
     'AFRM', 'UPST', 'SOFI', 'HOOD', 'RBLX', 'BABA', 'BIDU', 'JD',
     'MSTR', 'MRNA', 'PFE', 'BA', 'CCL', 'AAL', 'SPCE', 'NKLA',
-    'SNDL', 'TLRY', 'ACB', 'CGC', 'FCEL', 'PLUG', 'QS', 'CHPT',
-    'DDOG', 'SNOW', 'MDB', 'ZS', 'NET', 'FSLY', 'U', 'DASH',
-    'ABNB', 'CVNA', 'W', 'F', 'T', 'VZ', 'DIS', 'PYPL',
-    'SHOP', 'TWLO', 'DOCU', 'PTON', 'BYND', 'DKNG', 'PINS'
+    'SNDL', 'TLRY', 'ACB', 'CGC', 'FCEL', 'PLUG', 'QS', 'CHPT'
 ]
-
-# ===== OUTILS =====
-def is_valid_ticker(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        if not info or info.get('regularMarketPrice') is None:
-            return False
-        hist = stock.history(period='5d')
-        if hist.empty or len(hist) < 2:
-            return False
-        return True
-    except:
-        return False
 
 def get_stock_info(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        name = info.get('longName', info.get('shortName', ticker))
-        isin = info.get('isin', 'N/A')
-        return name, isin
+        return info.get('longName', ticker), info.get('isin', 'N/A')
     except:
         return ticker, 'N/A'
 
 def get_current_price(ticker):
     try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period='1d')
-        if not hist.empty:
-            return hist['Close'].iloc[-1]
+        hist = yf.Ticker(ticker).history(period='1d')
+        return hist['Close'].iloc[-1] if not hist.empty else None
     except:
-        pass
-    return None
+        return None
 
 def get_analysis(ticker):
     try:
-        if not is_valid_ticker(ticker):
-            return None
-        
         df = yf.download(ticker, period='3mo', progress=False)
-        if df.empty or len(df) < 20:
-            return None
-        
+        if df.empty or len(df) < 20: return None
         close = df['Close'].squeeze()
         volume = df['Volume'].squeeze()
-        current_price = close.iloc[-1]
-        
+        current = close.iloc[-1]
         delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = -delta.where(delta < 0, 0).rolling(14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs.iloc[-1])) if loss.iloc[-1] != 0 else 50
-        
+        rsi = 100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1])) if loss.iloc[-1] != 0 else 50
         ema12 = close.ewm(span=12).mean()
         ema26 = close.ewm(span=26).mean()
-        macd_line = ema12 - ema26
-        signal_line = macd_line.ewm(span=9).mean()
-        
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9).mean()
         ma20 = close.rolling(20).mean().iloc[-1]
         ma50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else ma20
-        
         avg_vol = volume.iloc[-20:].mean()
         vol_ratio = volume.iloc[-1] / avg_vol if avg_vol > 0 else 1
-        
         high = df['High'].squeeze()
         low = df['Low'].squeeze()
         tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
         atr = tr.rolling(14).mean().iloc[-1]
-        
         score = 50
         if 30 <= rsi <= 50: score += 15
-        elif rsi < 30: score += 10
-        if macd_line.iloc[-1] > signal_line.iloc[-1]: score += 10
-        if current_price > ma20: score += 10
-        if current_price > ma50: score += 5
+        if macd.iloc[-1] > signal.iloc[-1]: score += 10
+        if current > ma20: score += 10
+        if current > ma50: score += 5
         if vol_ratio > 1.5: score += 10
-        
         score = min(100, max(0, score))
-        
-        stop_loss = round(current_price - 2 * atr, 2)
-        tp1 = round(current_price + 2 * atr, 2)
-        tp2 = round(current_price + 4 * atr, 2)
-        
         name, isin = get_stock_info(ticker)
-        
-        return {
-            'ticker': ticker,
-            'name': name,
-            'isin': isin,
-            'price': round(current_price, 2),
-            'rsi': round(rsi, 1),
-            'macd': round(macd_line.iloc[-1], 3),
-            'macd_signal': round(signal_line.iloc[-1], 3),
-            'ma20': round(ma20, 2),
-            'ma50': round(ma50, 2),
-            'atr': round(atr, 2),
-            'vol_ratio': round(vol_ratio, 1),
-            'score': score,
-            'stop_loss': stop_loss,
-            'tp1': tp1,
-            'tp2': tp2
-        }
-    except Exception as e:
-        print(f"Erreur analyse {ticker}: {e}")
+        return {'ticker': ticker, 'name': name, 'isin': isin, 'price': round(current, 2),
+                'rsi': round(rsi, 1), 'macd': round(macd.iloc[-1], 3), 'macd_signal': round(signal.iloc[-1], 3),
+                'ma20': round(ma20, 2), 'ma50': round(ma50, 2), 'atr': round(atr, 2),
+                'vol_ratio': round(vol_ratio, 1), 'score': score,
+                'stop_loss': round(current - 2*atr, 2), 'tp1': round(current + 2*atr, 2), 'tp2': round(current + 4*atr, 2)}
+    except:
         return None
 
-def send_alert_to_all(message, parse='Markdown'):
-    subscribers = get_all_subscribers()
-    for chat_id in subscribers:
-        try:
-            bot.send_message(chat_id, message, parse_mode=parse)
-        except Exception as e:
-            print(f"Erreur envoi a {chat_id}: {e}")
+def send_alert_to_all(msg):
+    for cid in get_all_subscribers():
+        try: bot.send_message(cid, msg, parse_mode='Markdown')
+        except: pass
 
-# ===== COMMANDES =====
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     add_subscriber(message.chat.id)
-    msg = "🚀 *TRADER PRO BOT*\n\n"
-    msg += "✅ Vous recevrez les alertes automatiques !\n\n"
-    msg += "*Commandes :*\n"
-    msg += "📊 /analyse TICKER - Analyse complete + ISIN\n"
-    msg += "💥 /explosive - Top 5 opportunites\n"
-    msg += "🔍 /scan - Detection breakouts\n"
-    msg += "📈 /marche - Indices en direct\n"
-    msg += "💼 /portfolio - Positions + P&L\n"
-    msg += "📋 /historique - Trades fermes\n"
-    msg += "📊 /stats - Performance\n"
-    msg += "🔔 /alerte TICKER PRIX\n"
-    msg += "📁 /import_csv - Import Trading212\n"
-    msg += "📚 /aide - Guide complet"
-    bot.reply_to(message, msg, parse_mode='Markdown')
+    bot.reply_to(message, "🚀 *Bot actif !*\n/analyse AAPL | /scan | /explosive | /aide", parse_mode='Markdown')
 
 @bot.message_handler(commands=['aide'])
 def cmd_aide(message):
-    msg = "📚 *GUIDE COMPLET*\n\n"
-    msg += "*/analyse TICKER* → RSI, MACD, MA, Stop/TP, ISIN\n"
-    msg += "*/explosive* → Top 5 meilleurs scores\n"
-    msg += "*/scan* → Breakouts volume x3\n"
-    msg += "*/marche* → S&P500, Nasdaq, Dow, VIX\n"
-    msg += "*/portfolio* → Positions ouvertes\n"
-    msg += "*/vendre TICKER* → Fermer une position\n"
-    msg += "*/historique* → 10 derniers trades\n"
-    msg += "*/stats* → Win rate, P&L, best/worst\n"
-    msg += "*/alerte TICKER PRIX* → Alerte prix\n"
-    msg += "*/import_csv* → Import CSV Trading212\n\n"
-    msg += "🔔 Alertes auto : breakouts score 85+ toutes les 15 min"
-    bot.reply_to(message, msg, parse_mode='Markdown')
+    bot.reply_to(message, "/analyse TICKER | /scan | /explosive | /marche | /portfolio | /vendre TICKER | /historique | /stats | /alerte TICKER PRIX | /import_csv", parse_mode='Markdown')
 
 @bot.message_handler(commands=['analyse'])
 def cmd_analyse(message):
-    try:
-        ticker = message.text.split()[1].upper()
-    except:
-        bot.reply_to(message, "❌ /analyse AAPL")
-        return
-    
-    bot.send_chat_action(message.chat.id, 'typing')
+    try: ticker = message.text.split()[1].upper()
+    except: bot.reply_to(message, "❌ /analyse AAPL"); return
     a = get_analysis(ticker)
-    
-    if not a:
-        bot.reply_to(message, f"❌ Donnees indisponibles pour {ticker}")
-        return
-    
-    msg = f"📊 *{a['name']} ({a['ticker']})*\n"
-    msg += f"🔖 ISIN : `{a['isin']}`\n\n"
-    msg += f"⭐ Score : {a['score']}/100\n"
-    msg += f"💰 Prix : ${a['price']}\n\n"
-    msg += "📈 *Indicateurs :*\n"
-    msg += f"• RSI : {a['rsi']}\n"
-    msg += f"• MACD : {a['macd']} | Signal : {a['macd_signal']}\n"
-    msg += f"• MA20 : ${a['ma20']} | MA50 : ${a['ma50']}\n"
-    msg += f"• Volume : {a['vol_ratio']}x moyenne\n\n"
-    msg += "🛡️ *Gestion du risque :*\n"
-    msg += f"• 🛑 Stop-Loss : ${a['stop_loss']}\n"
-    msg += f"• 🎯 Take-Profit 1 : ${a['tp1']}\n"
-    msg += f"• 🎯 Take-Profit 2 : ${a['tp2']}"
-    
+    if not a: bot.reply_to(message, "❌ Donnees indisponibles"); return
+    msg = f"📊 *{a['name']} ({a['ticker']})*\n🔖 ISIN: `{a['isin']}`\n⭐ Score: {a['score']}/100\n💰 ${a['price']}\n📈 RSI: {a['rsi']} | MACD: {a['macd']}\n🛑 Stop: ${a['stop_loss']} | TP1: ${a['tp1']}"
     markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("🛒 1", callback_data=f"buy_{ticker}_{a['price']}_1"),
-        types.InlineKeyboardButton("🛒 5", callback_data=f"buy_{ticker}_{a['price']}_5"),
-        types.InlineKeyboardButton("🛒 10", callback_data=f"buy_{ticker}_{a['price']}_10"),
-        types.InlineKeyboardButton("❌ Pass", callback_data="pass")
-    )
-    
+    markup.add(types.InlineKeyboardButton("🛒 1", callback_data=f"buy_{ticker}_{a['price']}_1"),
+               types.InlineKeyboardButton("🛒 5", callback_data=f"buy_{ticker}_{a['price']}_5"),
+               types.InlineKeyboardButton("🛒 10", callback_data=f"buy_{ticker}_{a['price']}_10"),
+               types.InlineKeyboardButton("❌ Pass", callback_data="pass"))
     bot.reply_to(message, msg, parse_mode='Markdown', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
 def handle_buy(call):
-    parts = call.data.split('_')
-    ticker = parts[1]
-    price = float(parts[2])
-    qty = int(parts[3])
-    
-    bot.answer_callback_query(call.id, f"Achat {qty} {ticker}")
-    msg = bot.send_message(call.message.chat.id,
-        f"🛒 *Achat {ticker}*\nQte : {qty}\nPrix indicatif : ${price:.2f}\n\nQuel est votre prix d'achat exact ?",
-        parse_mode='Markdown')
-    bot.register_next_step_handler(msg, process_buy, ticker, qty)
+    _, ticker, price, qty = call.data.split('_')
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, f"🛒 Prix d'achat exact pour {ticker} ?", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, process_buy, ticker, int(qty))
 
 @bot.callback_query_handler(func=lambda call: call.data == 'pass')
 def handle_pass(call):
-    bot.answer_callback_query(call.id, "Opportunite ignoree")
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    bot.answer_callback_query(call.id, "Ignore")
 
 def process_buy(message, ticker, qty):
-    try:
-        buy_price = float(message.text.replace(',', '.'))
-    except:
-        bot.reply_to(message, "❌ Prix invalide.")
-        return
-    
+    try: price = float(message.text.replace(',', '.'))
+    except: bot.reply_to(message, "❌ Invalide"); return
     a = get_analysis(ticker)
-    stop = a['stop_loss'] if a else round(buy_price * 0.95, 2)
-    tp1 = a['tp1'] if a else round(buy_price * 1.10, 2)
-    tp2 = a['tp2'] if a else round(buy_price * 1.20, 2)
-    
-    db_execute('''INSERT INTO positions (chat_id, ticker, buy_price, quantity, stop_loss, take_profit1, take_profit2, highest_price, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (message.chat.id, ticker, buy_price, qty, stop, tp1, tp2, buy_price, datetime.now().isoformat()))
-    
-    msg = f"✅ *{ticker}* achete : {qty} x ${buy_price:.2f}\n"
-    msg += f"🛑 Stop ${stop}\n🎯 TP1 ${tp1}\n🎯 TP2 ${tp2}"
-    bot.reply_to(message, msg, parse_mode='Markdown')
+    stop = a['stop_loss'] if a else round(price*0.95, 2)
+    tp1 = a['tp1'] if a else round(price*1.10, 2)
+    tp2 = a['tp2'] if a else round(price*1.20, 2)
+    db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, stop_loss, take_profit1, take_profit2, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?)',
+               (message.chat.id, ticker, price, qty, stop, tp1, tp2, price, datetime.now().isoformat()))
+    bot.reply_to(message, f"✅ *{ticker}* x{qty} a ${price:.2f}", parse_mode='Markdown')
 
 @bot.message_handler(commands=['scan'])
 def cmd_scan(message):
     bot.send_chat_action(message.chat.id, 'typing')
     breakouts = []
-    
     for t in WATCHLIST:
         try:
-            if not is_valid_ticker(t):
-                continue
-            
             df = yf.download(t, period='5d', progress=False)
-            if len(df) < 2:
-                continue
-            
-            close = df['Close'].squeeze()
-            vol = df['Volume'].squeeze()
-            avg_vol = vol.iloc[:-1].mean()
-            
-            if avg_vol > 0 and vol.iloc[-1] > 3 * avg_vol and close.iloc[-1] > close.iloc[-2]:
+            if len(df) < 2: continue
+            c, v = df['Close'].squeeze(), df['Volume'].squeeze()
+            avg = v.iloc[:-1].mean()
+            if avg > 0 and v.iloc[-1] > 3*avg and c.iloc[-1] > c.iloc[-2]:
                 a = get_analysis(t)
                 if a:
                     name, isin = get_stock_info(t)
-                    breakouts.append({
-                        'ticker': t, 'name': name, 'isin': isin,
-                        'price': close.iloc[-1], 'vol_ratio': round(vol.iloc[-1]/avg_vol, 1),
-                        'score': a['score'], 'stop_loss': a['stop_loss'], 'tp1': a['tp1']
-                    })
-        except:
-            pass
+                    breakouts.append({'ticker': t, 'name': name, 'isin': isin, 'price': c.iloc[-1], 'score': a['score'], 'stop': a['stop_loss'], 'tp1': a['tp1']})
+        except: pass
         time.sleep(0.1)
-    
-    if not breakouts:
-        bot.reply_to(message, "🔍 Aucun breakout detecte pour le moment.")
-        return
-    
+    if not breakouts: bot.reply_to(message, "Aucun breakout"); return
     breakouts.sort(key=lambda x: x['score'], reverse=True)
-    
-    msg = "🔍 *BREAKOUTS DETECTES*\n\n"
+    msg = "🔍 *BREAKOUTS*\n\n"
     for b in breakouts[:5]:
-        msg += f"🚀 *{b['name']} ({b['ticker']})*\n"
-        msg += f"   🔖 ISIN : `{b['isin']}`\n"
-        msg += f"   ⭐ Score : {b['score']}/100\n"
-        msg += f"   📊 Vol x{b['vol_ratio']} | 💰 ${b['price']:.2f}\n"
-        msg += f"   🛑 Stop : ${b['stop_loss']} | 🎯 TP1 : ${b['tp1']}\n\n"
-    
+        msg += f"🚀 *{b['name']} ({b['ticker']})*\n🔖 `{b['isin']}`\n⭐ {b['score']}/100 | 💰 ${b['price']:.2f}\n🛑 Stop ${b['stop']}\n\n"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['explosive'])
 def cmd_explosive(message):
     bot.send_chat_action(message.chat.id, 'typing')
-    results = []
-    for t in WATCHLIST:
-        a = get_analysis(t)
-        if a and a['score'] >= 60:
-            results.append(a)
-        time.sleep(0.1)
-    results.sort(key=lambda x: x['score'], reverse=True)
-    
-    if not results:
-        bot.reply_to(message, "Aucune opportunite forte detectee.")
-        return
-    
-    msg = "💥 *TOP OPPORTUNITES*\n\n"
-    for i, a in enumerate(results[:5], 1):
-        msg += f"*{i}. {a['name']} ({a['ticker']})*\n"
-        msg += f"   🔖 ISIN : `{a['isin']}`\n"
-        msg += f"   ⭐ Score : {a['score']}/100 | 💰 ${a['price']}\n\n"
+    res = [a for t in WATCHLIST if (a := get_analysis(t)) and a['score'] >= 60]
+    res.sort(key=lambda x: x['score'], reverse=True)
+    if not res: bot.reply_to(message, "Aucune"); return
+    msg = "💥 *TOP*\n\n"
+    for a in res[:5]: msg += f"*{a['name']}* ⭐{a['score']}/100 💰${a['price']}\n🔖 `{a['isin']}`\n\n"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['marche'])
 def cmd_marche(message):
-    bot.send_chat_action(message.chat.id, 'typing')
-    indices = {'^GSPC': 'S&P 500', '^IXIC': 'Nasdaq', '^DJI': 'Dow Jones', '^VIX': 'VIX'}
-    msg = "📈 *INDICES EN DIRECT*\n\n"
-    for t, name in indices.items():
+    msg = "📈 *MARCHE*\n\n"
+    for t, n in {'^GSPC': 'S&P500', '^IXIC': 'Nasdaq', '^DJI': 'Dow', '^VIX': 'VIX'}.items():
         try:
-            stock = yf.Ticker(t)
-            hist = stock.history(period='2d')
-            if len(hist) >= 2:
-                curr = hist['Close'].iloc[-1]
-                prev = hist['Close'].iloc[-2]
-                chg = ((curr - prev) / prev) * 100
-                emoji = "🟢" if chg > 0 else "🔴"
-                msg += f"{emoji} *{name}* : {curr:,.2f} ({chg:+.2f}%)\n"
-        except:
-            pass
-    msg += f"\n🕐 {datetime.now().strftime('%H:%M:%S')}"
+            h = yf.Ticker(t).history(period='2d')
+            if len(h) >= 2:
+                c, p = h['Close'].iloc[-1], h['Close'].iloc[-2]
+                chg = (c-p)/p*100
+                msg += f"{'🟢' if chg>0 else '🔴'} *{n}* {c:,.2f} ({chg:+.2f}%)\n"
+        except: pass
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['portfolio'])
 def cmd_portfolio(message):
-    rows = db_fetchall('SELECT * FROM positions WHERE chat_id = ? AND status = ?', (message.chat.id, 'open'))
-    if not rows:
-        bot.reply_to(message, "📭 Votre portefeuille est vide.\n\n/analyse TICKER pour commencer")
-        return
-    
-    msg = "💼 *VOTRE PORTEFEUILLE*\n\n"
-    total_inv = 0
-    total_cur = 0
+    rows = db_fetchall("SELECT * FROM positions WHERE chat_id=? AND status='open'", (message.chat.id,))
+    if not rows: bot.reply_to(message, "📭 Vide"); return
+    msg, ti, tc = "💼 *PORTEFEUILLE*\n\n", 0, 0
     for r in rows:
-        ticker = r[2]
-        buy = r[3]
-        qty = r[4]
-        curr = get_current_price(ticker) or buy
-        inv = buy * qty
-        val = curr * qty
-        pnl = val - inv
-        pnl_pct = ((curr / buy) - 1) * 100
-        total_inv += inv
-        total_cur += val
-        emoji = "🟢" if pnl >= 0 else "🔴"
-        msg += f"{emoji} *{ticker}* x{qty}\n"
-        msg += f"   Achat : ${buy:.2f} | Actuel : ${curr:.2f}\n"
-        msg += f"   P&L : ${pnl:.2f} ({pnl_pct:+.1f}%)\n\n"
-    
-    total_pnl = total_cur - total_inv
-    total_pnl_pct = ((total_cur / total_inv) - 1) * 100 if total_inv > 0 else 0
-    msg += "━━━━━━━━━━━━━━━━\n"
-    msg += f"💰 *Total :* ${total_cur:.2f}\n"
-    msg += f"📈 *P&L :* ${total_pnl:.2f} ({total_pnl_pct:+.1f}%)"
+        curr = get_current_price(r[2]) or r[3]
+        pnl = (curr - r[3]) * r[4]
+        ti += r[3]*r[4]; tc += curr*r[4]
+        msg += f"{'🟢' if pnl>=0 else '🔴'} *{r[2]}* x{r[4]}\n   ${r[3]:.2f} → ${curr:.2f} | ${pnl:.2f}\n\n"
+    msg += f"━━━━━━\n💰 Total: ${tc:.2f} | P&L: ${tc-ti:.2f}"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['vendre'])
 def cmd_vendre(message):
-    try:
-        ticker = message.text.split()[1].upper()
-    except:
-        bot.reply_to(message, "❌ /vendre TICKER\nExemple : /vendre AAPL")
-        return
-    
-    row = db_fetchone('SELECT * FROM positions WHERE chat_id = ? AND ticker = ? AND status = ?', (message.chat.id, ticker, 'open'))
-    if not row:
-        bot.reply_to(message, f"❌ Aucune position ouverte pour {ticker}")
-        return
-    
+    try: ticker = message.text.split()[1].upper()
+    except: bot.reply_to(message, "❌ /vendre AAPL"); return
+    row = db_fetchone("SELECT * FROM positions WHERE chat_id=? AND ticker=? AND status='open'", (message.chat.id, ticker))
+    if not row: bot.reply_to(message, "❌ Pas de position"); return
     curr = get_current_price(ticker) or row[3]
     pnl = (curr - row[3]) * row[4]
-    pnl_pct = ((curr / row[3]) - 1) * 100
-    
-    db_execute('INSERT INTO trades (chat_id, ticker, buy_price, sell_price, quantity, profit_loss, profit_loss_pct, close_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-               (message.chat.id, ticker, row[3], curr, row[4], pnl, pnl_pct, datetime.now().isoformat()))
-    db_execute('UPDATE positions SET status = ? WHERE id = ?', ('closed', row[0]))
-    
-    emoji = "🟢" if pnl >= 0 else "🔴"
-    msg = f"✅ *{ticker}* vendu avec succes\n"
-    msg += f"{emoji} P&L : ${pnl:.2f} ({pnl_pct:+.1f}%)"
-    bot.reply_to(message, msg, parse_mode='Markdown')
+    db_execute('INSERT INTO trades (chat_id, ticker, buy_price, sell_price, quantity, profit_loss, profit_loss_pct, close_date) VALUES (?,?,?,?,?,?,?,?)',
+               (message.chat.id, ticker, row[3], curr, row[4], pnl, (curr/row[3]-1)*100, datetime.now().isoformat()))
+    db_execute('UPDATE positions SET status=? WHERE id=?', ('closed', row[0]))
+    bot.reply_to(message, f"✅ *{ticker}* vendu\n{'🟢' if pnl>=0 else '🔴'} P&L: ${pnl:.2f}", parse_mode='Markdown')
 
 @bot.message_handler(commands=['historique'])
 def cmd_historique(message):
-    rows = db_fetchall('SELECT * FROM trades WHERE chat_id = ? ORDER BY close_date DESC LIMIT 10', (message.chat.id,))
-    if not rows:
-        bot.reply_to(message, "📋 Aucun trade ferme pour le moment.")
-        return
-    
-    msg = "📋 *10 DERNIERS TRADES*\n\n"
-    for r in rows:
-        emoji = "🟢" if r[6] >= 0 else "🔴"
-        msg += f"{emoji} *{r[2]}* x{r[5]}\n"
-        msg += f"   Achat : ${r[3]:.2f} → Vente : ${r[4]:.2f}\n"
-        msg += f"   P&L : ${r[6]:.2f} ({r[7]:+.1f}%)\n"
-        msg += f"   📅 {r[8][:10]}\n\n"
+    rows = db_fetchall('SELECT * FROM trades WHERE chat_id=? ORDER BY close_date DESC LIMIT 10', (message.chat.id,))
+    if not rows: bot.reply_to(message, "📋 Vide"); return
+    msg = "📋 *HISTORIQUE*\n\n"
+    for r in rows: msg += f"{'🟢' if r[6]>=0 else '🔴'} *{r[2]}* x{r[5]} | ${r[6]:.2f} ({r[7]:+.1f}%)\n"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['stats'])
 def cmd_stats(message):
-    rows = db_fetchall('SELECT profit_loss, profit_loss_pct FROM trades WHERE chat_id = ?', (message.chat.id,))
-    if not rows:
-        bot.reply_to(message, "📊 Pas encore de statistiques.\nFermez des trades pour en generer.")
-        return
-    
-    total_trades = len(rows)
+    rows = db_fetchall('SELECT profit_loss FROM trades WHERE chat_id=?', (message.chat.id,))
+    if not rows: bot.reply_to(message, "📊 Pas de stats"); return
     wins = sum(1 for r in rows if r[0] > 0)
-    total_pnl = sum(r[0] for r in rows)
-    best = max(r[0] for r in rows)
-    worst = min(r[0] for r in rows)
-    avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
-    win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
-    
-    msg = "📊 *STATISTIQUES DE TRADING*\n\n"
-    msg += f"📈 Nombre de trades : {total_trades}\n"
-    msg += f"✅ Win rate : {win_rate:.1f}%\n"
-    msg += f"💰 P&L Total : ${total_pnl:.2f}\n"
-    msg += f"📊 P&L Moyen : ${avg_pnl:.2f}\n"
-    msg += f"🏆 Meilleur trade : ${best:.2f}\n"
-    msg += f"💀 Pire trade : ${worst:.2f}"
+    total = sum(r[0] for r in rows)
+    msg = f"📊 *STATS*\n📈 Trades: {len(rows)}\n✅ Win rate: {wins/len(rows)*100:.1f}%\n💰 P&L: ${total:.2f}\n🏆 Best: ${max(r[0] for r in rows):.2f}\n💀 Worst: ${min(r[0] for r in rows):.2f}"
     bot.reply_to(message, msg, parse_mode='Markdown')
 
 @bot.message_handler(commands=['alerte'])
 def cmd_alerte(message):
     try:
-        parts = message.text.split()
-        ticker = parts[1].upper()
-        target = float(parts[2])
-    except:
-        bot.reply_to(message, "❌ /alerte TICKER PRIX\nExemple : /alerte AAPL 200")
-        return
-    
-    db_execute('INSERT INTO alerts (chat_id, ticker, target_price, date) VALUES (?, ?, ?, ?)', (message.chat.id, ticker, target, datetime.now().isoformat()))
-    bot.reply_to(message, f"🔔 Alerte creee : *{ticker}* a ${target:.2f}", parse_mode='Markdown')
-
-@bot.message_handler(commands=['alertes'])
-def cmd_alertes(message):
-    rows = db_fetchall('SELECT * FROM alerts WHERE chat_id = ? AND active = 1', (message.chat.id,))
-    if not rows:
-        bot.reply_to(message, "📢 Aucune alerte active.")
-        return
-    
-    msg = "📢 *ALERTES ACTIVES*\n\n"
-    for r in rows:
-        curr = get_current_price(r[2])
-        curr_str = f" (Actuel : ${curr:.2f})" if curr else ""
-        msg += f"🔔 *{r[2]}* → ${r[3]:.2f}{curr_str}\n"
-    bot.reply_to(message, msg, parse_mode='Markdown')
+        _, ticker, price = message.text.split()
+        db_execute('INSERT INTO alerts (chat_id, ticker, target_price, date) VALUES (?,?,?,?)', (message.chat.id, ticker.upper(), float(price), datetime.now().isoformat()))
+        bot.reply_to(message, f"🔔 Alerte {ticker.upper()} a ${price}")
+    except: bot.reply_to(message, "❌ /alerte AAPL 200")
 
 @bot.message_handler(commands=['import_csv'])
 def cmd_import_csv(message):
-    msg = bot.reply_to(message, "📁 *Import CSV Trading212*\n\nEnvoyez votre fichier CSV.\n\n*Format accepte :*\nAction,Quantite,Prix\nAAPL,10,150.50", parse_mode='Markdown')
-    bot.register_next_step_handler(msg, process_csv)
+    msg = bot.reply_to(message, "📁 Envoyez le CSV (Action,Quantite,Prix)")
+    bot.register_next_step_handler(msg, lambda m: process_csv(m))
 
 def process_csv(message):
-    content = message.text
-    if message.document:
-        file_info = bot.get_file(message.document.file_id)
-        downloaded = bot.download_file(file_info.file_path)
-        content = downloaded.decode('utf-8')
-    
-    if not content:
-        bot.reply_to(message, "❌ Contenu vide.")
-        return
-    
+    content = message.document and bot.download_file(bot.get_file(message.document.file_id).file_path).decode('utf-8') or message.text
+    if not content: bot.reply_to(message, "❌ Vide"); return
     try:
-        reader = csv.DictReader(io.StringIO(content))
         count = 0
-        for row in reader:
-            ticker = row.get('Action', row.get('Ticker', row.get('Symbol', '')))
-            qty = int(float(row.get('Quantite', row.get('Quantité', row.get('Quantity', 0)))))
-            price = float(row.get('Prix', row.get('Prix d\'achat', row.get('Price', 0))))
-            if ticker and qty > 0 and price > 0:
-                db_execute('''INSERT INTO positions (chat_id, ticker, buy_price, quantity, stop_loss, take_profit1, take_profit2, highest_price, date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (message.chat.id, ticker.upper(), price, qty, round(price*0.95,2), round(price*1.10,2), round(price*1.20,2), price, datetime.now().isoformat()))
+        for row in csv.DictReader(io.StringIO(content)):
+            t, q, p = row.get('Action', row.get('Ticker', '')), int(float(row.get('Quantite', row.get('Quantity', 0)))), float(row.get('Prix', row.get('Price', 0)))
+            if t and q > 0 and p > 0:
+                db_execute('INSERT INTO positions (chat_id, ticker, buy_price, quantity, stop_loss, take_profit1, take_profit2, highest_price, date) VALUES (?,?,?,?,?,?,?,?,?)',
+                           (message.chat.id, t.upper(), p, q, round(p*.95,2), round(p*1.1,2), round(p*1.2,2), p, datetime.now().isoformat()))
                 count += 1
-        bot.reply_to(message, f"✅ *{count} positions importees avec succes !*\n\n/portfolio pour les voir.", parse_mode='Markdown')
-    except Exception as e:
-        bot.reply_to(message, f"❌ Erreur lors de l'import : {str(e)}\n\nVerifiez le format : Action,Quantite,Prix")
+        bot.reply_to(message, f"✅ {count} positions importees")
+    except Exception as e: bot.reply_to(message, f"❌ {e}")
 
-# ===== SURVEILLANCE AUTOMATIQUE =====
-def auto_scan_breakouts():
-    print(f"[{datetime.now().strftime('%H:%M')}] Auto-scan...")
-    exceptional = []
-    
-    for t in WATCHLIST[:30]:
+def auto_scan():
+    for t in WATCHLIST[:20]:
         try:
-            if not is_valid_ticker(t):
-                continue
-            
             df = yf.download(t, period='5d', progress=False)
-            if len(df) < 2:
-                continue
-            
-            close = df['Close'].squeeze()
-            vol = df['Volume'].squeeze()
-            avg_vol = vol.iloc[:-1].mean()
-            
-            if avg_vol > 0 and vol.iloc[-1] > 3 * avg_vol and close.iloc[-1] > close.iloc[-2]:
+            if len(df) < 2: continue
+            c, v = df['Close'].squeeze(), df['Volume'].squeeze()
+            if v.iloc[:-1].mean() > 0 and v.iloc[-1] > 3*v.iloc[:-1].mean() and c.iloc[-1] > c.iloc[-2]:
                 a = get_analysis(t)
                 if a and a['score'] >= 85:
-                    name, isin = get_stock_info(t)
-                    exceptional.append({
-                        'ticker': t, 'name': name, 'isin': isin,
-                        'price': a['price'], 'score': a['score'],
-                        'stop_loss': a['stop_loss'], 'tp1': a['tp1']
-                    })
-        except:
-            pass
+                    n, i = get_stock_info(t)
+                    send_alert_to_all(f"🔔 *BREAKOUT*\n{n} ({t})\n🔖 `{i}`\n⭐ {a['score']}/100\n💰 ${a['price']:.2f}")
+        except: pass
         time.sleep(0.1)
-    
-    if exceptional:
-        msg = "🔔 *ALERTE AUTO - BREAKOUTS EXCEPTIONNELS*\n\n"
-        for b in exceptional[:3]:
-            msg += f"🔥 *{b['name']} ({b['ticker']})*\n"
-            msg += f"   🔖 ISIN : `{b['isin']}`\n"
-            msg += f"   ⭐ Score : {b['score']}/100\n"
-            msg += f"   💰 ${b['price']:.2f}\n"
-            msg += f"   🛑 Stop : ${b['stop_loss']} | 🎯 TP1 : ${b['tp1']}\n\n"
-        msg += "📊 /analyse TICKER pour plus de details"
-        send_alert_to_all(msg)
 
-def monitor_positions():
-    rows = db_fetchall("SELECT * FROM positions WHERE status = 'open'")
-    for r in rows:
+def monitor():
+    for r in db_fetchall("SELECT * FROM positions WHERE status='open'"):
         curr = get_current_price(r[2])
-        if not curr:
-            continue
-        
-        if curr > r[8]:
-            db_execute('UPDATE positions SET highest_price = ? WHERE id = ?', (curr, r[0]))
-        if curr >= r[3] * 1.05:
-            new_stop = round(curr * 0.97, 2)
-            if new_stop > r[5]:
-                db_execute('UPDATE positions SET stop_loss = ? WHERE id = ?', (new_stop, r[0]))
-        
+        if not curr: continue
+        if curr > r[8]: db_execute('UPDATE positions SET highest_price=? WHERE id=?', (curr, r[0]))
+        if curr >= r[3]*1.05:
+            ns = round(curr*.97, 2)
+            if ns > r[5]: db_execute('UPDATE positions SET stop_loss=? WHERE id=?', (ns, r[0]))
         if curr <= r[5]:
-            try:
-                bot.send_message(r[1], f"🚨 *STOP-LOSS ATTEINT*\n\n📊 {r[2]}\n💰 Prix : ${curr:.2f}\n🛑 Stop : ${r[5]}\n\n⚡ /vendre {r[2]}", parse_mode='Markdown')
+            try: bot.send_message(r[1], f"🚨 *STOP* {r[2]} ${curr:.2f}", parse_mode='Markdown')
             except: pass
-        elif curr >= r[7]:
-            try:
-                bot.send_message(r[1], f"🎯 *TAKE-PROFIT 2 ATTEINT !*\n\n📊 {r[2]}\n💰 Prix : ${curr:.2f}\n📈 Gain : +{((curr/r[3])-1)*100:.1f}%\n\n💡 /vendre {r[2]}", parse_mode='Markdown')
-            except: pass
-        elif curr >= r[6]:
-            try:
-                bot.send_message(r[1], f"🎯 *TAKE-PROFIT 1 ATTEINT !*\n\n📊 {r[2]}\n💰 Prix : ${curr:.2f}\n📈 Gain : +{((curr/r[3])-1)*100:.1f}%\n\n💡 Pensez a securiser vos gains", parse_mode='Markdown')
-            except: pass
-
-def check_alerts():
-    rows = db_fetchall("SELECT * FROM alerts WHERE active = 1")
-    for r in rows:
-        curr = get_current_price(r[2])
-        if curr and curr >= r[3]:
-            try:
-                bot.send_message(r[1], f"🔔 *ALERTE PRIX ATTEINTE !*\n\n📊 {r[2]}\n💰 Prix actuel : ${curr:.2f}\n🎯 Cible : ${r[3]:.2f}\n\nL'alerte va etre desactivee.", parse_mode='Markdown')
-            except: pass
-            db_execute('UPDATE alerts SET active = 0 WHERE id = ?', (r[0],))
 
 def run_scheduler():
-    schedule.every(15).minutes.do(auto_scan_breakouts)
-    schedule.every(10).minutes.do(monitor_positions)
-    schedule.every(5).minutes.do(check_alerts)
-    while True:
-        schedule.run_pending()
-        time.sleep(10)
+    schedule.every(15).minutes.do(auto_scan)
+    schedule.every(10).minutes.do(monitor)
+    while True: schedule.run_pending(); time.sleep(10)
 
-# ===== FLASK WEBHOOK =====
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        bot.process_new_updates([telebot.types.Update.de_json(request.get_data().decode('utf-8'))])
         return 'ok', 200
     return 'bad request', 400
 
 @app.route('/')
 def home():
-    return "Bot Trader Pro - Operationnel", 200
+    return "Bot OK", 200
 
-# ===== DEMARRAGE =====
-    if __name__ == '__main__':
-    print("Demarrage du Bot Trader Pro...")
+if __name__ == '__main__':
+    print("Demarrage...")
     bot.remove_webhook()
     time.sleep(0.5)
     bot.set_webhook(url=WEBHOOK_URL + '/webhook')
-    print(f"Bot connecte sur {WEBHOOK_URL}")
-    print("Base de donnees initialisee")
-    print("Auto-scan des breakouts toutes les 15 minutes")
-    print("Surveillance des positions toutes les 10 minutes")
-    print("Verification des alertes toutes les 5 minutes")
-    print("Pret a trader !")
-    
+    print(f"Bot sur {WEBHOOK_URL}")
     threading.Thread(target=run_scheduler, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT)
