@@ -111,26 +111,32 @@ def get_yahoo_info(ticker):
 
 def get_fast_analysis(ticker):
     """
-    Analyse rapide : prix (Finnhub > Yahoo), volume, score, stop/tp.
-    Retourne None si impossible d'obtenir un prix.
+    Récupère le prix via yf.download (2 jours), puis les infos fondamentales via stock.info.
+    Très fiable, même sans Finnhub.
     """
     try:
-        current_price = get_current_price_finnhub(ticker)
-        if not current_price:
-            info = get_yahoo_info(ticker)
-            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
-        else:
-            info = get_yahoo_info(ticker)
-
-        if not current_price or current_price == 0:
+        # Téléchargement des 2 derniers jours (donne le prix actuel et la clôture précédente)
+        df = yf.download(ticker, period='2d', progress=False)
+        if df.empty or len(df) < 2:
             return None
 
-        previous_close = info.get('previousClose', current_price)
-        change_pct = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
-        volume = info.get('volume', 0)
+        current_price = float(df['Close'].iloc[-1])
+        previous_close = float(df['Close'].iloc[-2])
+        volume = int(df['Volume'].iloc[-1]) if 'Volume' in df else 0
+
+        # Informations supplémentaires (via stock.info, sans bloquer)
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+        except:
+            info = {}
+
+        change_pct = ((current_price - previous_close) / previous_close) * 100
+
         avg_volume = info.get('averageVolume', 0)
         vol_ratio = volume / avg_volume if avg_volume > 0 else 1
 
+        # Score technique simple
         score = 50
         if change_pct > 0: score += 10
         if change_pct > 5: score += 10
@@ -139,13 +145,14 @@ def get_fast_analysis(ticker):
         if volume > 1000000: score += 10
         score = min(100, score)
 
+        # ATR estimé
         atr = current_price * 0.03
         stop_loss = round(current_price - 2 * atr, 2)
         tp1 = round(current_price + 2 * atr, 2)
         tp2 = round(current_price + 4 * atr, 2)
         tp3 = round(current_price + 6 * atr, 2)
 
-        name = info.get('shortName', info.get('longName', ticker))
+        name = info.get('shortName', info.get('longName', ticker)) or ticker
         isin = info.get('isin', 'N/A')
         sector = info.get('sector', 'N/A')
 
