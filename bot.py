@@ -445,6 +445,21 @@ def cmd_aide(message):
 def cmd_ping(message):
     bot.reply_to(message, "pong")
 
+@bot.message_handler(commands=['testyf'])
+def cmd_test_yf(message):
+    try:
+        ticker = "AAPL"
+        df = yf.download(ticker, period='2d', progress=False)
+        if df.empty or len(df) < 2:
+            bot.reply_to(message, "❌ yfinance n'a pas récupéré de données.")
+            return
+        current = df['Close'].iloc[-1]
+        previous = df['Close'].iloc[-2]
+        change = ((current - previous) / previous) * 100
+        bot.reply_to(message, f"✅ yfinance OK\nAAPL : ${current:.2f} ({change:+.2f}%)")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erreur yfinance : {str(e)[:200]}")
+
 @bot.message_handler(commands=['setrange'])
 def cmd_setrange(message):
     try:
