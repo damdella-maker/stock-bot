@@ -111,32 +111,31 @@ def get_yahoo_info(ticker):
 
 def get_fast_analysis(ticker):
     """
-    Récupère le prix via yf.download (2 jours), puis les infos fondamentales via stock.info.
-    Très fiable, même sans Finnhub.
+    Récupère le prix via Finnhub (très fiable).
+    Complète avec Yahoo info pour les fondamentaux (sans téléchargement).
     """
     try:
-        # Téléchargement des 2 derniers jours (donne le prix actuel et la clôture précédente)
-        df = yf.download(ticker, period='2d', progress=False)
-        if df.empty or len(df) < 2:
+        # 1. Prix via Finnhub
+        url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_KEY}"
+        resp = requests.get(url, timeout=5).json()
+        if 'c' not in resp or resp['c'] == 0:
             return None
 
-        current_price = float(df['Close'].iloc[-1])
-        previous_close = float(df['Close'].iloc[-2])
-        volume = int(df['Volume'].iloc[-1]) if 'Volume' in df else 0
+        current_price = resp['c']
+        previous_close = resp.get('pc', 0)
+        volume = resp.get('v', 0)
 
-        # Informations supplémentaires (via stock.info, sans bloquer)
+        # 2. Infos fondamentales (non bloquantes)
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
         except:
             info = {}
 
-        change_pct = ((current_price - previous_close) / previous_close) * 100
-
+        change_pct = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
         avg_volume = info.get('averageVolume', 0)
         vol_ratio = volume / avg_volume if avg_volume > 0 else 1
 
-        # Score technique simple
         score = 50
         if change_pct > 0: score += 10
         if change_pct > 5: score += 10
@@ -145,7 +144,6 @@ def get_fast_analysis(ticker):
         if volume > 1000000: score += 10
         score = min(100, score)
 
-        # ATR estimé
         atr = current_price * 0.03
         stop_loss = round(current_price - 2 * atr, 2)
         tp1 = round(current_price + 2 * atr, 2)
@@ -178,7 +176,7 @@ def get_fast_analysis(ticker):
     except Exception as e:
         print(f"Erreur get_fast_analysis {ticker}: {e}")
         return None
-
+        
 def scan_all_movers():
     """
     Scan de toutes les actions de la watchlist.
