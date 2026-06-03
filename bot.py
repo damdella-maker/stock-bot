@@ -458,6 +458,18 @@ def cmd_test_yf(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Erreur yfinance : {str(e)[:200]}")
 
+@bot.message_handler(commands=['testfh'])
+def cmd_test_fh(message):
+    try:
+        url = f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={FINNHUB_KEY}"
+        resp = requests.get(url, timeout=5).json()
+        if 'c' in resp and resp['c'] > 0:
+            bot.reply_to(message, f"✅ Finnhub OK\nAAPL : ${resp['c']:.2f}")
+        else:
+            bot.reply_to(message, f"❌ Finnhub n'a pas renvoyé de prix.\nRéponse : {resp}")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erreur Finnhub : {str(e)[:200]}")
+
 @bot.message_handler(commands=['setrange'])
 def cmd_setrange(message):
     try:
